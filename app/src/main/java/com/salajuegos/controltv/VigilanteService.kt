@@ -21,7 +21,6 @@ import java.net.Socket
 class VigilanteService : Service() {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private lateinit var crypto: AdbCrypto
     private val numTvs = 6
     private val avisoEnviado = BooleanArray(numTvs + 1) { false }
     private val tiemposActivos = IntArray(numTvs + 1) { -1 } // -1 = sin tiempo/desconectado
@@ -162,7 +161,7 @@ class VigilanteService : Service() {
     }
 
     private suspend fun verificarYControlarTv(id: Int, nombre: String, ip: String) {
-        val salida = ejecutarAdb(ip, "cat /sdcard/Download/sala_fin.txt 2>/dev/null; echo '|'; date +%s")
+        val salida = AdbManager.ejecutar(this, ip, "cat /sdcard/Download/sala_fin.txt 2>/dev/null; echo '|'; cat /sdcard/Download/sala_libre.txt 2>/dev/null; echo '|'; date +%s")
         if (salida == null) {
             tiemposActivos[id] = -1
             return
@@ -200,35 +199,10 @@ class VigilanteService : Service() {
         if (restante <= 0) {
             avisoEnviado[id] = false
             tiemposActivos[id] = 0
-            ejecutarAdb(ip, "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; input keyevent 26")
+            AdbManager.ejecutar(this, ip, "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; input keyevent 26")
         }
     }
 
-    private fun ejecutarAdb(ip: String, comando: String): String? {
-        var socket: Socket? = null
-        var conn: AdbConnection? = null
-        return try {
-            socket = Socket()
-            socket.soTimeout = 1500
-            socket.connect(InetSocketAddress(ip, 5555), 1500)
-            conn = AdbConnection.create(socket, crypto)
-            conn.connect()
-            val stream = conn.open("shell:$comando")
-            val sb = StringBuilder()
-            while (!stream.isClosed) {
-                try {
-                    val b = stream.read()
-                    if (b != null) sb.append(String(b))
-                } catch (_: Exception) { break }
-            }
-            sb.toString()
-        } catch (_: Exception) {
-            null
-        } finally {
-            try { conn?.close() } catch (_: Exception) {}
-            try { socket?.close() } catch (_: Exception) {}
-        }
-    }
 
     override fun onDestroy() {
         scope.cancel()
