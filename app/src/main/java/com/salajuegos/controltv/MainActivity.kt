@@ -17,6 +17,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.*
 import java.text.NumberFormat
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import kotlin.math.ceil
 
@@ -31,26 +33,45 @@ class MainActivity : AppCompatActivity() {
         val scroll = ScrollView(this).apply { setBackgroundColor(Color.parseColor("#090D16")) }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(22), dp(14), dp(32))
+            setPadding(dp(14), dp(20), dp(14), dp(32))
         }
 
+        // Cabecera superior con título y botón directo de Reportes
+        val topBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, dp(16))
+        }
+
+        val bloqueTitulo = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
         val titulo = TextView(this).apply {
             text = "🎮 EjocGames Time"
-            textSize = 26f
+            textSize = 23f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor("#38BDF8"))
-            gravity = Gravity.CENTER
-            setPadding(0, 0, 0, dp(4))
         }
         val subtitulo = TextView(this).apply {
-            text = "Control de Pantallas, Tiempos y Tarifas"
-            textSize = 14f
+            text = "Control de Pantallas y Tarifas"
+            textSize = 13f
             setTextColor(Color.parseColor("#94A3B8"))
-            gravity = Gravity.CENTER
-            setPadding(0, 0, 0, dp(18))
         }
-        root.addView(titulo)
-        root.addView(subtitulo)
+        bloqueTitulo.addView(titulo)
+        bloqueTitulo.addView(subtitulo)
+
+        val btnReportes = crearBotonGrande("📊 Reportes", "#1E293B", 13.5f, "#38BDF8").apply {
+            setTextColor(Color.parseColor("#38BDF8"))
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            minHeight = dp(42)
+            minimumHeight = dp(42)
+            setOnClickListener { mostrarDialogoReportes() }
+        }
+
+        topBar.addView(bloqueTitulo)
+        topBar.addView(btnReportes)
+        root.addView(topBar)
 
         contenedorTvs = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(contenedorTvs)
@@ -229,7 +250,7 @@ class MainActivity : AppCompatActivity() {
         val h = totalMins / 60
         val m = totalMins % 60
         return when {
-            h == 0 -> "${m}m (0.${(m * 100) / 60}h)"
+            h == 0 -> "${m}m"
             m == 0 -> "${h}h"
             else -> "${h}h ${m}m"
         }
@@ -548,6 +569,252 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ==================== PANTALLA DE REPORTES INTEGRADA ====================
+
+    private fun mostrarDialogoReportes() {
+        var periodoActual = "HOY"
+
+        val contenedorPrincipal = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#0F172A"))
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+        }
+
+        // Fila de filtros de período: Hoy | Ayer | Este Mes | Mes Ant.
+        val filaFiltros = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 0, 0, dp(12))
+        }
+
+        val scrollContenido = ScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(430)
+            )
+        }
+        val cuerpoReporte = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        scrollContenido.addView(cuerpoReporte)
+
+        val botonesFiltro = mutableMapOf<String, Button>()
+
+        fun renderizarReporte(periodo: String) {
+            periodoActual = periodo
+            botonesFiltro.forEach { (clave, btn) ->
+                val activo = clave == periodo
+                btn.background = crearFondoRedondeado(
+                    if (activo) "#0284C7" else "#1E293B",
+                    8f,
+                    if (activo) "#38BDF8" else "#334155"
+                )
+                btn.setTextColor(if (activo) Color.WHITE else Color.parseColor("#94A3B8"))
+            }
+
+            cuerpoReporte.removeAllViews()
+            val registros = HistorialManager.filtrarPorPeriodo(this, periodo)
+            val totalDinero = registros.sumOf { it.valor }
+            val totalMinutos = registros.sumOf { it.minutos }
+            val ranking = HistorialManager.calcularRankingConsolas(registros)
+
+            // 1. Tarjeta de Totales del Período
+            val cardTotales = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = crearFondoRedondeado("#162032", 14f, "#26354D")
+                setPadding(dp(14), dp(14), dp(14), dp(14))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { setMargins(0, 0, 0, dp(14)) }
+            }
+
+            val tituloPeriodo = when (periodo) {
+                "HOY" -> "Resumen de Hoy"
+                "AYER" -> "Resumen de Ayer"
+                "MES_ACTUAL" -> "Acumulado Este Mes"
+                "MES_ANTERIOR" -> "Acumulado Mes Anterior"
+                else -> "Resumen"
+            }
+
+            cardTotales.addView(TextView(this).apply {
+                text = tituloPeriodo
+                textSize = 14f
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(Color.parseColor("#38BDF8"))
+                setPadding(0, 0, 0, dp(6))
+            })
+
+            cardTotales.addView(TextView(this).apply {
+                text = "💵 Total Recaudado: ${formatearMoneda(totalDinero)}"
+                textSize = 20f
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(Color.parseColor("#22C55E"))
+                setPadding(0, 0, 0, dp(4))
+            })
+
+            cardTotales.addView(TextView(this).apply {
+                text = "⏱️ Horas jugadas: ${formatearEnHoras(totalMinutos)}  •  🎮 Sesiones: ${registros.size}"
+                textSize = 14f
+                setTextColor(Color.parseColor("#E2E8F0"))
+            })
+
+            cuerpoReporte.addView(cardTotales)
+
+            // 2. Ranking de Consolas (Mayor a menor tiempo de uso)
+            cuerpoReporte.addView(TextView(this).apply {
+                text = "🏆 Consolas Más Jugadas (Mayor a Menor)"
+                textSize = 15f
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(Color.WHITE)
+                setPadding(0, dp(4), 0, dp(8))
+            })
+
+            if (ranking.isEmpty()) {
+                cuerpoReporte.addView(TextView(this).apply {
+                    text = "Aún no hay cierres de tiempo registrados en este período."
+                    textSize = 13.5f
+                    setTextColor(Color.parseColor("#94A3B8"))
+                    setPadding(0, 0, 0, dp(14))
+                })
+            } else {
+                ranking.forEachIndexed { idx, est ->
+                    val porcentaje = if (totalMinutos > 0) (est.minutosTotales * 100) / totalMinutos else 0
+                    val filaEst = LinearLayout(this).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        background = crearFondoRedondeado("#1E293B", 10f, "#334155")
+                        setPadding(dp(12), dp(10), dp(12), dp(10))
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT
+                        ).apply { setMargins(0, 0, 0, dp(8)) }
+                    }
+
+                    val colIzq = LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    }
+                    colIzq.addView(TextView(this).apply {
+                        text = "#${idx + 1}  ${est.nombreEstacion}"
+                        textSize = 15f
+                        setTypeface(null, Typeface.BOLD)
+                        setTextColor(Color.WHITE)
+                    })
+                    colIzq.addView(TextView(this).apply {
+                        text = "Uso: ${formatearEnHoras(est.minutosTotales)} ($porcentaje%) • ${est.sesiones} turno(s)"
+                        textSize = 12.5f
+                        setTextColor(Color.parseColor("#94A3B8"))
+                    })
+
+                    val txtValorEst = TextView(this).apply {
+                        text = formatearMoneda(est.valorTotal)
+                        textSize = 15f
+                        setTypeface(null, Typeface.BOLD)
+                        setTextColor(Color.parseColor("#38BDF8"))
+                    }
+
+                    filaEst.addView(colIzq)
+                    filaEst.addView(txtValorEst)
+                    cuerpoReporte.addView(filaEst)
+                }
+            }
+
+            // 3. Detalle cronológico de sesiones cerradas
+            if (registros.isNotEmpty()) {
+                cuerpoReporte.addView(TextView(this).apply {
+                    text = "🧾 Detalle de Cierres (${registros.size})"
+                    textSize = 15f
+                    setTypeface(null, Typeface.BOLD)
+                    setTextColor(Color.WHITE)
+                    setPadding(0, dp(10), 0, dp(8))
+                })
+
+                registros.forEach { reg ->
+                    val lineaReg = TextView(this).apply {
+                        val etiquetaFecha = if (periodo == "HOY" || periodo == "AYER") reg.hora else "${reg.fecha} ${reg.hora}"
+                        text = "• [$etiquetaFecha] ${reg.nombreEstacion}: ${formatearEnHoras(reg.minutos)} → ${formatearMoneda(reg.valor)}"
+                        textSize = 13f
+                        setTextColor(Color.parseColor("#CBD5E1"))
+                        setPadding(dp(4), dp(4), dp(4), dp(4))
+                    }
+                    cuerpoReporte.addView(lineaReg)
+                }
+            }
+
+            // 4. Botón opcional de compartir/exportar texto (sin obligar a bajar archivos)
+            if (registros.isNotEmpty()) {
+                val btnCompartirOpcional = crearBotonGrande("📤 Compartir Resumen (Opcional)", "#1E293B", 13f, "#475569").apply {
+                    setTextColor(Color.parseColor("#CBD5E1"))
+                    minHeight = dp(40)
+                    minimumHeight = dp(40)
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply { setMargins(0, dp(14), 0, dp(4)) }
+                    setOnClickListener {
+                        compartirResumenTexto(tituloPeriodo, totalDinero, totalMinutos, ranking, registros)
+                    }
+                }
+                cuerpoReporte.addView(btnCompartirOpcional)
+            }
+        }
+
+        listOf(
+            "HOY" to "Hoy",
+            "AYER" to "Ayer",
+            "MES_ACTUAL" to "Este Mes",
+            "MES_ANTERIOR" to "Mes Ant."
+        ).forEachIndexed { idx, (clave, etiqueta) ->
+            val btn = crearBotonGrande(etiqueta, "#1E293B", 12.5f, "#334155").apply {
+                minHeight = dp(38)
+                minimumHeight = dp(38)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    setMargins(if (idx == 0) 0 else dp(3), 0, if (idx == 3) 0 else dp(3), 0)
+                }
+                setOnClickListener { renderizarReporte(clave) }
+            }
+            botonesFiltro[clave] = btn
+            filaFiltros.addView(btn)
+        }
+
+        contenedorPrincipal.addView(filaFiltros)
+        contenedorPrincipal.addView(scrollContenido)
+
+        renderizarReporte(periodoActual)
+
+        AlertDialog.Builder(this)
+            .setTitle("📊 Caja y Estadísticas • EjocGames")
+            .setView(contenedorPrincipal)
+            .setPositiveButton("Cerrar", null)
+            .show()
+    }
+
+    private fun compartirResumenTexto(
+        tituloPeriodo: String,
+        totalDinero: Int,
+        totalMinutos: Int,
+        ranking: List<EstadisticaEstacion>,
+        registros: List<RegistroSesion>
+    ) {
+        val sb = StringBuilder()
+        sb.append("🎮 *EjocGames Time - $tituloPeriodo*\n")
+        sb.append("💵 Total: *${formatearMoneda(totalDinero)}*\n")
+        sb.append("⏱️ Horas: *${formatearEnHoras(totalMinutos)}* (${registros.size} sesiones)\n\n")
+        sb.append("🏆 *Ranking por uso:*\n")
+        ranking.forEachIndexed { idx, est ->
+            sb.append("${idx + 1}. ${est.nombreEstacion}: ${formatearEnHoras(est.minutosTotales)} (${formatearMoneda(est.valorTotal)})\n")
+        }
+
+        val intentShare = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "Reporte EjocGames - $tituloPeriodo")
+            putExtra(Intent.EXTRA_TEXT, sb.toString())
+        }
+        startActivity(Intent.createChooser(intentShare, "Compartir resumen opcional"))
+    }
+
+    // ==================== FIN PANTALLA DE REPORTES ====================
+
     private fun sincronizarAhoraEnParalelo() {
         lifecycleScope.launch {
             val ids = EstadoSala.obtenerIdsEstaciones(this@MainActivity)
@@ -766,8 +1033,6 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this@MainActivity, "Sin conexión con ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
                 }
             } else {
-                // Quita el timer para no apagar el TV, conserva el cobro previo y abre una ventana de gracia:
-                // NO suma dinero si el cliente cierra la cuenta, pero SÍ descuenta estos minutos si agrega más tiempo.
                 val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; date +%s > /sdcard/Download/sala_libre.txt"
                 val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
                 if (res != null) {
@@ -827,6 +1092,7 @@ class MainActivity : AppCompatActivity() {
     private fun cerrarSesionCompleta(id: Int) {
         lifecycleScope.launch {
             val ip = obtenerIp(id)
+            val nombreEstacion = obtenerNombre(id)
             val salida = AdbManager.ejecutar(
                 this@MainActivity,
                 ip,
@@ -834,7 +1100,7 @@ class MainActivity : AppCompatActivity() {
                 esAccionManual = true
             )
             if (salida == null) {
-                Toast.makeText(this@MainActivity, "${obtenerNombre(id)} sin conexión", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, "$nombreEstacion sin conexión", Toast.LENGTH_SHORT).show()
                 return@launch
             }
 
@@ -844,10 +1110,9 @@ class MainActivity : AppCompatActivity() {
             val minsPrevios = obtenerMinutosAcumulados(id)
             val esGracia = esVentanaGracia(id)
 
-            // Caso 1: Estaba corriendo en Tiempo Libre
+            // Caso 1: Estaba corriendo en Tiempo Libre o Ventana de Seguridad
             if (inicioLibre > 1700000000L && ahora >= inicioLibre) {
                 val segLibre = (ahora - inicioLibre).toInt()
-                // Si viene de ventana de seguridad (Quitar), NO suma cobro extra; si fue Tiempo Libre real, redondea a 15m
                 val minCobroLibre = if (esGracia) 0 else redondearBloques15Min(segLibre)
                 val totalFinalMins = minsPrevios + minCobroLibre
                 val totalValor = calcularValorSesion(id, totalFinalMins)
@@ -870,21 +1135,22 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 AlertDialog.Builder(this@MainActivity)
-                    .setTitle("💰 Cerrar Tiempo • ${obtenerNombre(id)}")
+                    .setTitle("💰 Cerrar Tiempo • $nombreEstacion")
                     .setMessage(
                         "${detalleLibre}\n" +
                         "⏱️ Tiempo total sesión: ${formatearEnHoras(totalFinalMins)}\n" +
                         "💵 TOTAL A COBRAR: ${formatearMoneda(totalValor)}\n\n" +
-                        "¿Confirmar cierre de sesión?"
+                        "¿Confirmar cierre de sesión y registrar en reportes?"
                     )
                     .setPositiveButton("Confirmar y Cerrar") { _, _ ->
                         lifecycleScope.launch {
                             AdbManager.ejecutar(this@MainActivity, ip, "rm -f /sdcard/Download/sala_libre.txt /sdcard/Download/sala_fin.txt", esAccionManual = true)
+                            HistorialManager.registrarCierre(this@MainActivity, id, nombreEstacion, totalFinalMins, totalValor)
                             EstadoSala.esLibre[id] = false
                             EstadoSala.segundos[id] = 0
                             limpiarMinutosAcumulados(id)
                             pintarTarjeta(id)
-                            Toast.makeText(this@MainActivity, "Cerrado: ${formatearEnHoras(totalFinalMins)} • ${formatearMoneda(totalValor)}", Toast.LENGTH_LONG).show()
+                            Toast.makeText(this@MainActivity, "✅ Registrado: ${formatearEnHoras(totalFinalMins)} • ${formatearMoneda(totalValor)}", Toast.LENGTH_LONG).show()
                         }
                     }
                     .setNegativeButton("Cancelar", null)
@@ -896,26 +1162,27 @@ class MainActivity : AppCompatActivity() {
             if (minsPrevios > 0) {
                 val totalValor = calcularValorSesion(id, minsPrevios)
                 AlertDialog.Builder(this@MainActivity)
-                    .setTitle("💰 Cerrar Tiempo • ${obtenerNombre(id)}")
+                    .setTitle("💰 Cerrar Tiempo • $nombreEstacion")
                     .setMessage(
                         "⏱️ Tiempo total sesión: ${formatearEnHoras(minsPrevios)}\n" +
                         "💵 TOTAL A COBRAR: ${formatearMoneda(totalValor)}\n\n" +
-                        "¿Confirmar cierre y reiniciar contador?"
+                        "¿Confirmar cierre y registrar en reportes?"
                     )
                     .setPositiveButton("Confirmar y Cerrar") { _, _ ->
                         lifecycleScope.launch {
                             AdbManager.ejecutar(this@MainActivity, ip, "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_libre.txt", esAccionManual = true)
+                            HistorialManager.registrarCierre(this@MainActivity, id, nombreEstacion, minsPrevios, totalValor)
                             EstadoSala.esLibre[id] = false
                             EstadoSala.segundos[id] = 0
                             limpiarMinutosAcumulados(id)
                             pintarTarjeta(id)
-                            Toast.makeText(this@MainActivity, "Cerrado: ${formatearEnHoras(minsPrevios)} • ${formatearMoneda(totalValor)}", Toast.LENGTH_LONG).show()
+                            Toast.makeText(this@MainActivity, "✅ Registrado: ${formatearEnHoras(minsPrevios)} • ${formatearMoneda(totalValor)}", Toast.LENGTH_LONG).show()
                         }
                     }
                     .setNegativeButton("Cancelar", null)
                     .show()
             } else {
-                Toast.makeText(this@MainActivity, "${obtenerNombre(id)} no tiene tiempo acumulado activo", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, "$nombreEstacion no tiene tiempo acumulado activo", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -943,7 +1210,6 @@ class MainActivity : AppCompatActivity() {
 
             val baseSegundos = if (ahora > 1700000000L && finActual > ahora) (finActual - ahora).toInt() else 0
 
-            // Tanto si estaba en Tiempo Libre real como en Ventana de Seguridad, se descuentan los segundos ya transcurridos
             val segYaJugadosEnLibre = if (ahora > 1700000000L && inicioLibre > 1700000000L && ahora >= inicioLibre) {
                 (ahora - inicioLibre).toInt()
             } else {
