@@ -182,6 +182,7 @@ class MainActivity : AppCompatActivity() {
             .remove("tarifa_60_$id")
             .remove("bloqueada_$id")
             .remove("mins_acumulados_$id")
+            .remove("libre_es_gracia_$id")
             .apply()
 
         EstadoSala.online.remove(id)
@@ -213,6 +214,11 @@ class MainActivity : AppCompatActivity() {
         return (horasCompletas * p60) + valorResto
     }
 
+    private fun redondearBloques15Min(segundos: Int): Int {
+        val bloques15 = ceil(segundos.coerceAtLeast(1) / 900.0).toInt().coerceAtLeast(1)
+        return bloques15 * 15
+    }
+
     private fun formatearMoneda(valor: Int): String {
         val formato = NumberFormat.getNumberInstance(Locale("es", "CO"))
         return "$${formato.format(valor)}"
@@ -234,6 +240,16 @@ class MainActivity : AppCompatActivity() {
         return prefs.getBoolean("bloqueada_$id", false)
     }
 
+    private fun esVentanaGracia(id: Int): Boolean {
+        return getSharedPreferences("sala_tvs", Context.MODE_PRIVATE).getBoolean("libre_es_gracia_$id", false)
+    }
+
+    private fun setVentanaGracia(id: Int, esGracia: Boolean) {
+        getSharedPreferences("sala_tvs", Context.MODE_PRIVATE).edit()
+            .putBoolean("libre_es_gracia_$id", esGracia)
+            .apply()
+    }
+
     private fun obtenerMinutosAcumulados(id: Int): Int {
         val prefs = getSharedPreferences("sala_tvs", Context.MODE_PRIVATE)
         return prefs.getInt("mins_acumulados_$id", 0)
@@ -248,6 +264,7 @@ class MainActivity : AppCompatActivity() {
     private fun limpiarMinutosAcumulados(id: Int) {
         getSharedPreferences("sala_tvs", Context.MODE_PRIVATE).edit()
             .putInt("mins_acumulados_$id", 0)
+            .putBoolean("libre_es_gracia_$id", false)
             .apply()
     }
 
@@ -736,31 +753,32 @@ class MainActivity : AppCompatActivity() {
             val ip = obtenerIp(id)
             val estabaEnLibre = EstadoSala.esLibre[id] == true
             if (estabaEnLibre) {
-                // Si ya estaba en Tiempo Libre, sí reinicia el reloj libre a 0 manteniendo el acumulado previo
                 val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt /sdcard/Download/sala_libre.txt"
                 val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
                 if (res != null) {
                     EstadoSala.online[id] = true
                     EstadoSala.esLibre[id] = false
                     EstadoSala.segundos[id] = 0
+                    setVentanaGracia(id, false)
                     pintarTarjeta(id)
                     Toast.makeText(this@MainActivity, "Tiempo Libre detenido en ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(this@MainActivity, "Sin conexión con ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
                 }
             } else {
-                // Quita el temporizador para que NO se apague el TV, conserva el cobro acumulado
-                // y arranca Tiempo Libre automáticamente para contabilizar los minutos de gracia
+                // Quita el timer para no apagar el TV, conserva el cobro previo y abre una ventana de gracia:
+                // NO suma dinero si el cliente cierra la cuenta, pero SÍ descuenta estos minutos si agrega más tiempo.
                 val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; date +%s > /sdcard/Download/sala_libre.txt"
                 val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
                 if (res != null) {
                     EstadoSala.online[id] = true
                     EstadoSala.esLibre[id] = true
                     EstadoSala.segundos[id] = 0
+                    setVentanaGracia(id, true)
                     pintarTarjeta(id)
                     val acum = obtenerMinutosAcumulados(id)
                     val msgAcum = if (acum > 0) " (Mantiene ${formatearEnHoras(acum)})" else ""
-                    Toast.makeText(this@MainActivity, "⏱️ Timer quitado → Pasó a Tiempo Libre$msgAcum", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "🛡️ Ventana de seguridad activa$msgAcum", Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(this@MainActivity, "Sin conexión con ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
                 }
@@ -795,6 +813,7 @@ class MainActivity : AppCompatActivity() {
                 EstadoSala.online[id] = true
                 EstadoSala.esLibre[id] = true
                 EstadoSala.segundos[id] = 0
+                setVentanaGracia(id, false)
                 pintarTarjeta(id)
                 Toast.makeText(this@MainActivity, "⏱️ Tiempo Libre iniciado en ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
             } else {
@@ -823,21 +842,37 @@ class MainActivity : AppCompatActivity() {
             val inicioLibre = partes.getOrNull(0)?.trim()?.toLongOrNull() ?: 0L
             val ahora = partes.getOrNull(1)?.trim()?.toLongOrNull() ?: 0L
             val minsPrevios = obtenerMinutosAcumulados(id)
+            val esGracia = esVentanaGracia(id)
 
+            // Caso 1: Estaba corriendo en Tiempo Libre
             if (inicioLibre > 1700000000L && ahora >= inicioLibre) {
                 val segLibre = (ahora - inicioLibre).toInt()
-                val bloques30 = ceil(segLibre / 1800.0).toInt().coerceAtLeast(1)
-                val minCobroLibre = bloques30 * 30
+                // Si viene de ventana de seguridad (Quitar), NO suma cobro extra; si fue Tiempo Libre real, redondea a 15m
+                val minCobroLibre = if (esGracia) 0 else redondearBloques15Min(segLibre)
                 val totalFinalMins = minsPrevios + minCobroLibre
                 val totalValor = calcularValorSesion(id, totalFinalMins)
 
-                val detallePrevio = if (minsPrevios > 0) "Tiempo previo: ${formatearEnHoras(minsPrevios)}\n" else ""
+                if (totalFinalMins <= 0 && esGracia) {
+                    AdbManager.ejecutar(this@MainActivity, ip, "rm -f /sdcard/Download/sala_libre.txt /sdcard/Download/sala_fin.txt", esAccionManual = true)
+                    EstadoSala.esLibre[id] = false
+                    EstadoSala.segundos[id] = 0
+                    limpiarMinutosAcumulados(id)
+                    pintarTarjeta(id)
+                    Toast.makeText(this@MainActivity, "Ventana de seguridad cerrada sin cobro pendiente", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+
+                val detalleLibre = if (esGracia) {
+                    "Ventana de seguridad (${segLibre / 60}m sin costo adicional)\n"
+                } else {
+                    val detallePrevio = if (minsPrevios > 0) "Tiempo previo: ${formatearEnHoras(minsPrevios)}\n" else ""
+                    "${detallePrevio}Tiempo Libre redondeado (15m): ${formatearEnHoras(minCobroLibre)}\n"
+                }
 
                 AlertDialog.Builder(this@MainActivity)
                     .setTitle("💰 Cerrar Tiempo • ${obtenerNombre(id)}")
                     .setMessage(
-                        "${detallePrevio}" +
-                        "Tiempo Libre redondeado: ${formatearEnHoras(minCobroLibre)}\n\n" +
+                        "${detalleLibre}\n" +
                         "⏱️ Tiempo total sesión: ${formatearEnHoras(totalFinalMins)}\n" +
                         "💵 TOTAL A COBRAR: ${formatearMoneda(totalValor)}\n\n" +
                         "¿Confirmar cierre de sesión?"
@@ -857,6 +892,7 @@ class MainActivity : AppCompatActivity() {
                 return@launch
             }
 
+            // Caso 2: Sesión con temporizador normal
             if (minsPrevios > 0) {
                 val totalValor = calcularValorSesion(id, minsPrevios)
                 AlertDialog.Builder(this@MainActivity)
@@ -907,7 +943,7 @@ class MainActivity : AppCompatActivity() {
 
             val baseSegundos = if (ahora > 1700000000L && finActual > ahora) (finActual - ahora).toInt() else 0
 
-            // Si venía corriendo en Tiempo Libre, se descuenta ese tiempo ya jugado del nuevo bloque solicitado
+            // Tanto si estaba en Tiempo Libre real como en Ventana de Seguridad, se descuentan los segundos ya transcurridos
             val segYaJugadosEnLibre = if (ahora > 1700000000L && inicioLibre > 1700000000L && ahora >= inicioLibre) {
                 (ahora - inicioLibre).toInt()
             } else {
@@ -923,6 +959,7 @@ class MainActivity : AppCompatActivity() {
                 if (minutosExtra > 1) {
                     sumarMinutosAcumulados(id, minutosExtra)
                 }
+                setVentanaGracia(id, false)
                 EstadoSala.online[id] = true
                 EstadoSala.esLibre[id] = false
                 EstadoSala.segundos[id] = totalSeg
@@ -930,7 +967,7 @@ class MainActivity : AppCompatActivity() {
                 val acum = obtenerMinutosAcumulados(id)
                 val valorAcum = calcularValorSesion(id, acum)
                 val notaDescuento = if (segYaJugadosEnLibre >= 60) {
-                    " (-${segYaJugadosEnLibre / 60}m de libre descontados)"
+                    " (-${segYaJugadosEnLibre / 60}m ya jugados)"
                 } else {
                     ""
                 }
@@ -948,6 +985,7 @@ class MainActivity : AppCompatActivity() {
         val nombre = obtenerNombre(id)
         val bloqueada = estaBloqueada(id)
         val acum = obtenerMinutosAcumulados(id)
+        val esGracia = esVentanaGracia(id)
         val txtReloj = contenedorTvs.findViewWithTag<TextView>("reloj_$id") ?: return
         val txtTitulo = contenedorTvs.findViewWithTag<TextView>("titulo_$id") ?: return
         val txtSubIp = contenedorTvs.findViewWithTag<TextView>("subip_$id")
@@ -967,17 +1005,24 @@ class MainActivity : AppCompatActivity() {
         txtReloj.text = String.format("%02d:%02d:%02d", h, m, s)
 
         if (EstadoSala.esLibre[id] == true) {
-            val bloques = ceil(seg.coerceAtLeast(1) / 1800.0).toInt().coerceAtLeast(1)
-            val minCobro = bloques * 30
-            val totalEstMins = acum + minCobro
-            val valorEst = calcularValorSesion(id, totalEstMins)
-            txtTitulo.text = "⏱️ $nombre (LIBRE)"
-            txtSubIp?.text = if (bloqueada) {
-                "🔒 Libre: ${formatearEnHoras(totalEstMins)} (${formatearMoneda(valorEst)})"
+            if (esGracia) {
+                val valorPrevio = calcularValorSesion(id, acum)
+                val infoPrevio = if (acum > 0) "${formatearEnHoras(acum)} (${formatearMoneda(valorPrevio)})" else "Sin cobro previo"
+                txtTitulo.text = "🛡️ $nombre (ESPERA)"
+                txtSubIp?.text = if (bloqueada) "🔒 Espera • $infoPrevio" else "Ventana seguridad • $infoPrevio"
+                txtReloj.setTextColor(Color.parseColor("#F59E0B"))
             } else {
-                "Libre: ${formatearEnHoras(totalEstMins)} • ${formatearMoneda(valorEst)}"
+                val minCobro = redondearBloques15Min(seg)
+                val totalEstMins = acum + minCobro
+                val valorEst = calcularValorSesion(id, totalEstMins)
+                txtTitulo.text = "⏱️ $nombre (LIBRE)"
+                txtSubIp?.text = if (bloqueada) {
+                    "🔒 Libre: ${formatearEnHoras(totalEstMins)} (${formatearMoneda(valorEst)})"
+                } else {
+                    "Libre: ${formatearEnHoras(totalEstMins)} • ${formatearMoneda(valorEst)}"
+                }
+                txtReloj.setTextColor(Color.parseColor("#38BDF8"))
             }
-            txtReloj.setTextColor(Color.parseColor("#38BDF8"))
         } else {
             txtTitulo.text = "🟢 $nombre"
             val infoAcum = if (acum > 0) {
