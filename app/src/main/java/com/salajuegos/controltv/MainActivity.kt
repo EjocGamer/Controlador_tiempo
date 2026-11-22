@@ -16,6 +16,8 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.*
+import java.text.NumberFormat
+import java.util.Locale
 import kotlin.math.ceil
 
 class MainActivity : AppCompatActivity() {
@@ -41,7 +43,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(0, 0, 0, dp(4))
         }
         val subtitulo = TextView(this).apply {
-            text = "Control de Pantallas, Tiempos y Audio"
+            text = "Control de Pantallas, Tiempos y Tarifas"
             textSize = 14f
             setTextColor(Color.parseColor("#94A3B8"))
             gravity = Gravity.CENTER
@@ -120,6 +122,77 @@ class MainActivity : AppCompatActivity() {
         return prefs.getString("ip_$id", "192.168.1.${100 + id}") ?: "192.168.1.${100 + id}"
     }
 
+    private fun obtenerTarifa15(id: Int): Int {
+        return getSharedPreferences("sala_tvs", Context.MODE_PRIVATE).getInt("tarifa_15_$id", 1500)
+    }
+
+    private fun obtenerTarifa30(id: Int): Int {
+        return getSharedPreferences("sala_tvs", Context.MODE_PRIVATE).getInt("tarifa_30_$id", 2500)
+    }
+
+    private fun obtenerTarifa45(id: Int): Int {
+        return getSharedPreferences("sala_tvs", Context.MODE_PRIVATE).getInt("tarifa_45_$id", 3500)
+    }
+
+    private fun obtenerTarifa60(id: Int): Int {
+        return getSharedPreferences("sala_tvs", Context.MODE_PRIVATE).getInt("tarifa_60_$id", 4500)
+    }
+
+    private fun guardarConfig(
+        id: Int,
+        nombre: String,
+        ip: String,
+        t15: Int,
+        t30: Int,
+        t45: Int,
+        t60: Int
+    ) {
+        getSharedPreferences("sala_tvs", Context.MODE_PRIVATE).edit()
+            .putString("nombre_$id", nombre.ifBlank { "Estación $id" })
+            .putString("ip_$id", ip)
+            .putInt("tarifa_15_$id", t15)
+            .putInt("tarifa_30_$id", t30)
+            .putInt("tarifa_45_$id", t45)
+            .putInt("tarifa_60_$id", t60)
+            .apply()
+    }
+
+    private fun calcularValorSesion(id: Int, totalMinutos: Int): Int {
+        if (totalMinutos <= 0) return 0
+        val p15 = obtenerTarifa15(id)
+        val p30 = obtenerTarifa30(id)
+        val p45 = obtenerTarifa45(id)
+        val p60 = obtenerTarifa60(id)
+
+        val horasCompletas = totalMinutos / 60
+        val restoMinutos = totalMinutos % 60
+
+        val valorResto = when {
+            restoMinutos == 0 -> 0
+            restoMinutos <= 15 -> p15
+            restoMinutos <= 30 -> p30
+            restoMinutos <= 45 -> p45
+            else -> p60
+        }
+        return (horasCompletas * p60) + valorResto
+    }
+
+    private fun formatearMoneda(valor: Int): String {
+        val formato = NumberFormat.getNumberInstance(Locale("es", "CO"))
+        return "$${formato.format(valor)}"
+    }
+
+    private fun formatearEnHoras(totalMins: Int): String {
+        if (totalMins <= 0) return "0h"
+        val h = totalMins / 60
+        val m = totalMins % 60
+        return when {
+            h == 0 -> "${m}m (0.${(m * 100) / 60}h)"
+            m == 0 -> "${h}h"
+            else -> "${h}h ${m}m"
+        }
+    }
+
     private fun estaBloqueada(id: Int): Boolean {
         val prefs = getSharedPreferences("sala_tvs", Context.MODE_PRIVATE)
         return prefs.getBoolean("bloqueada_$id", false)
@@ -151,13 +224,6 @@ class MainActivity : AppCompatActivity() {
         pintarTarjeta(id)
         val msg = if (nuevoEstado) "🔒 ${obtenerNombre(id)} bloqueada" else "🔓 ${obtenerNombre(id)} desbloqueada"
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
-    }
-
-    private fun guardarConfig(id: Int, nombre: String, ip: String) {
-        getSharedPreferences("sala_tvs", Context.MODE_PRIVATE).edit()
-            .putString("nombre_$id", nombre.ifBlank { "Estación $id" })
-            .putString("ip_$id", ip)
-            .apply()
     }
 
     private fun crearBotonTiempoProtegido(id: Int, mins: Int, etiqueta: String, colorHex: String, bloqueada: Boolean): Button {
@@ -281,7 +347,7 @@ class MainActivity : AppCompatActivity() {
                 tag = "extra_$i"
             }
 
-            // Subfila Extra 1 (Oculta): Tiempo Libre, Cerrar Tiempo (Toda la sesión), +1m Prueba
+            // Subfila Extra 1: Tiempo Libre, Cerrar Tiempo, +1m Prueba
             val filaSesionExtra = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             val btnIniciarLibre = crearBotonGrande(
                 "⏱️ Libre",
@@ -353,7 +419,7 @@ class MainActivity : AppCompatActivity() {
             filaAudio.addView(btnMute)
             filaAudio.addView(btnVolUp)
 
-            // Subfila Extra 3: Encender, Quitar (Protegido), Apagar
+            // Subfila Extra 3: Encender (con salto automático a HDMI 1), Quitar, Apagar
             val filaEnergia = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             val btnEncender = crearBotonGrande("⚡ Encender", "#16A34A", 13f).apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -452,12 +518,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun mostrarDialogoConfig(id: Int) {
+        val scrollDialog = ScrollView(this)
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(24), dp(16), dp(24), dp(8))
         }
 
-        val lblNombre = TextView(this).apply { text = "Nombre de la estación (ej. PS5 - 1):" }
+        val lblNombre = TextView(this).apply {
+            text = "Nombre de la estación (ej. PS5 - 1):"
+            setTypeface(null, Typeface.BOLD)
+        }
         val inputNombre = EditText(this).apply {
             setText(obtenerNombre(id))
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
@@ -465,6 +535,7 @@ class MainActivity : AppCompatActivity() {
 
         val lblIp = TextView(this).apply {
             text = "Dirección IP del TV:"
+            setTypeface(null, Typeface.BOLD)
             setPadding(0, dp(12), 0, 0)
         }
         val inputIp = EditText(this).apply {
@@ -473,16 +544,77 @@ class MainActivity : AppCompatActivity() {
             keyListener = DigitsKeyListener.getInstance("0123456789.")
         }
 
+        val lblTarifasTitulo = TextView(this).apply {
+            text = "💰 Tarifas de esta estación (en pesos):"
+            setTypeface(null, Typeface.BOLD)
+            setPadding(0, dp(16), 0, dp(6))
+        }
+
+        val lbl15 = TextView(this).apply { text = "Valor 15 minutos:" }
+        val input15 = EditText(this).apply {
+            setText(obtenerTarifa15(id).toString())
+            inputType = InputType.TYPE_CLASS_NUMBER
+        }
+
+        val lbl30 = TextView(this).apply {
+            text = "Valor 30 minutos:"
+            setPadding(0, dp(8), 0, 0)
+        }
+        val input30 = EditText(this).apply {
+            setText(obtenerTarifa30(id).toString())
+            inputType = InputType.TYPE_CLASS_NUMBER
+        }
+
+        val lbl45 = TextView(this).apply {
+            text = "Valor 45 minutos:"
+            setPadding(0, dp(8), 0, 0)
+        }
+        val input45 = EditText(this).apply {
+            setText(obtenerTarifa45(id).toString())
+            inputType = InputType.TYPE_CLASS_NUMBER
+        }
+
+        val lbl60 = TextView(this).apply {
+            text = "Valor 1 Hora (60 min):"
+            setPadding(0, dp(8), 0, 0)
+        }
+        val input60 = EditText(this).apply {
+            setText(obtenerTarifa60(id).toString())
+            inputType = InputType.TYPE_CLASS_NUMBER
+        }
+
         layout.addView(lblNombre)
         layout.addView(inputNombre)
         layout.addView(lblIp)
         layout.addView(inputIp)
+        layout.addView(lblTarifasTitulo)
+        layout.addView(lbl15)
+        layout.addView(input15)
+        layout.addView(lbl30)
+        layout.addView(input30)
+        layout.addView(lbl45)
+        layout.addView(input45)
+        layout.addView(lbl60)
+        layout.addView(input60)
+        scrollDialog.addView(layout)
 
         AlertDialog.Builder(this)
             .setTitle("Configurar Estación $id")
-            .setView(layout)
+            .setView(scrollDialog)
             .setPositiveButton("Guardar") { _, _ ->
-                guardarConfig(id, inputNombre.text.toString().trim(), inputIp.text.toString().trim())
+                val t15 = input15.text.toString().trim().toIntOrNull() ?: obtenerTarifa15(id)
+                val t30 = input30.text.toString().trim().toIntOrNull() ?: obtenerTarifa30(id)
+                val t45 = input45.text.toString().trim().toIntOrNull() ?: obtenerTarifa45(id)
+                val t60 = input60.text.toString().trim().toIntOrNull() ?: obtenerTarifa60(id)
+                guardarConfig(
+                    id,
+                    inputNombre.text.toString().trim(),
+                    inputIp.text.toString().trim(),
+                    t15,
+                    t30,
+                    t45,
+                    t60
+                )
                 construirTarjetas()
                 sincronizarAhoraEnParalelo()
             }
@@ -507,11 +639,15 @@ class MainActivity : AppCompatActivity() {
     private fun encenderTv(id: Int) {
         lifecycleScope.launch {
             val ip = obtenerIp(id)
+            // 1. Despierta el TV (keyevent 224)
             val res = AdbManager.ejecutar(this@MainActivity, ip, "input keyevent 224", esAccionManual = true)
             if (res != null) {
                 EstadoSala.online[id] = true
                 pintarTarjeta(id)
-                Toast.makeText(this@MainActivity, "Encendiendo ${obtenerNombre(id)}...", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, "Encendiendo ${obtenerNombre(id)} en HDMI 1...", Toast.LENGTH_SHORT).show()
+                // 2. Espera 1.2s a que cargue la interfaz y salta directo a HDMI 1 (keyevent 243)
+                delay(1200)
+                AdbManager.ejecutar(this@MainActivity, ip, "input keyevent 243", esAccionManual = true)
             } else {
                 Toast.makeText(this@MainActivity, "TV en reposo profundo (usa el control físico)", Toast.LENGTH_SHORT).show()
             }
@@ -595,19 +731,20 @@ class MainActivity : AppCompatActivity() {
             // Caso 1: Estaba en Tiempo Libre (puede tener además tiempo previo comprado)
             if (inicioLibre > 1700000000L && ahora >= inicioLibre) {
                 val segLibre = (ahora - inicioLibre).toInt()
-                val minRealesLibre = ceil(segLibre / 60.0).toInt().coerceAtLeast(1)
                 val bloques30 = ceil(segLibre / 1800.0).toInt().coerceAtLeast(1)
                 val minCobroLibre = bloques30 * 30
                 val totalFinalMins = minsPrevios + minCobroLibre
+                val totalValor = calcularValorSesion(id, totalFinalMins)
 
-                val detallePrevio = if (minsPrevios > 0) "Tiempo previo comprado: $minsPrevios min\n" else ""
+                val detallePrevio = if (minsPrevios > 0) "Tiempo previo: ${formatearEnHoras(minsPrevios)}\n" else ""
 
                 AlertDialog.Builder(this@MainActivity)
                     .setTitle("💰 Cerrar Tiempo • ${obtenerNombre(id)}")
                     .setMessage(
                         "${detallePrevio}" +
-                        "Tiempo Libre jugado: $minRealesLibre min (redondeado a $minCobroLibre min)\n\n" +
-                        "👉 TOTAL SESIÓN A COBRAR: ${formatearMinutos(totalFinalMins)}\n\n" +
+                        "Tiempo Libre redondeado: ${formatearEnHoras(minCobroLibre)}\n\n" +
+                        "⏱️ Tiempo total sesión: ${formatearEnHoras(totalFinalMins)}\n" +
+                        "💵 TOTAL A COBRAR: ${formatearMoneda(totalValor)}\n\n" +
                         "¿Confirmar cierre de sesión?"
                     )
                     .setPositiveButton("Confirmar y Cerrar") { _, _ ->
@@ -617,7 +754,7 @@ class MainActivity : AppCompatActivity() {
                             EstadoSala.segundos[id] = 0
                             limpiarMinutosAcumulados(id)
                             pintarTarjeta(id)
-                            Toast.makeText(this@MainActivity, "Sesión cerrada (${formatearMinutos(totalFinalMins)})", Toast.LENGTH_LONG).show()
+                            Toast.makeText(this@MainActivity, "Cerrado: ${formatearEnHoras(totalFinalMins)} • ${formatearMoneda(totalValor)}", Toast.LENGTH_LONG).show()
                         }
                     }
                     .setNegativeButton("Cancelar", null)
@@ -627,12 +764,13 @@ class MainActivity : AppCompatActivity() {
 
             // Caso 2: Sesión con temporizador normal (acumulado de todas las veces que pidió tiempo)
             if (minsPrevios > 0) {
+                val totalValor = calcularValorSesion(id, minsPrevios)
                 AlertDialog.Builder(this@MainActivity)
                     .setTitle("💰 Cerrar Tiempo • ${obtenerNombre(id)}")
                     .setMessage(
-                        "Total acumulado comprado en esta sesión:\n" +
-                        "👉 ${formatearMinutos(minsPrevios)} ($minsPrevios minutos)\n\n" +
-                        "¿Confirmar cierre y reiniciar contador de sesión?"
+                        "⏱️ Tiempo total sesión: ${formatearEnHoras(minsPrevios)}\n" +
+                        "💵 TOTAL A COBRAR: ${formatearMoneda(totalValor)}\n\n" +
+                        "¿Confirmar cierre y reiniciar contador?"
                     )
                     .setPositiveButton("Confirmar y Cerrar") { _, _ ->
                         lifecycleScope.launch {
@@ -641,7 +779,7 @@ class MainActivity : AppCompatActivity() {
                             EstadoSala.segundos[id] = 0
                             limpiarMinutosAcumulados(id)
                             pintarTarjeta(id)
-                            Toast.makeText(this@MainActivity, "Sesión cerrada (${formatearMinutos(minsPrevios)})", Toast.LENGTH_LONG).show()
+                            Toast.makeText(this@MainActivity, "Cerrado: ${formatearEnHoras(minsPrevios)} • ${formatearMoneda(totalValor)}", Toast.LENGTH_LONG).show()
                         }
                     }
                     .setNegativeButton("Cancelar", null)
@@ -649,16 +787,6 @@ class MainActivity : AppCompatActivity() {
             } else {
                 Toast.makeText(this@MainActivity, "${obtenerNombre(id)} no tiene tiempo acumulado activo", Toast.LENGTH_SHORT).show()
             }
-        }
-    }
-
-    private fun formatearMinutos(totalMins: Int): String {
-        val h = totalMins / 60
-        val m = totalMins % 60
-        return when {
-            h == 0 -> "$m min"
-            m == 0 -> "$h Hora(s)"
-            else -> "${h}h ${m}min"
         }
     }
 
@@ -687,7 +815,6 @@ class MainActivity : AppCompatActivity() {
             val cmd = "rm -f /sdcard/Download/sala_libre.txt; FIN=\$((\$(date +%s) + $totalSeg)); echo \$FIN > /sdcard/Download/sala_fin.txt"
             val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
             if (res != null) {
-                // Suma al historial acumulado de esta sesión (aunque se pulse varias veces o tras aviso)
                 if (minutosExtra > 1) {
                     sumarMinutosAcumulados(id, minutosExtra)
                 }
@@ -696,7 +823,12 @@ class MainActivity : AppCompatActivity() {
                 EstadoSala.segundos[id] = totalSeg
                 pintarTarjeta(id)
                 val acum = obtenerMinutosAcumulados(id)
-                Toast.makeText(this@MainActivity, "+${minutosExtra}m (Acumulado sesión: ${acum}m)", Toast.LENGTH_SHORT).show()
+                val valorAcum = calcularValorSesion(id, acum)
+                Toast.makeText(
+                    this@MainActivity,
+                    "+${minutosExtra}m • Total: ${formatearEnHoras(acum)} (${formatearMoneda(valorAcum)})",
+                    Toast.LENGTH_SHORT
+                ).show()
             }
         }
     }
@@ -727,12 +859,22 @@ class MainActivity : AppCompatActivity() {
         if (EstadoSala.esLibre[id]) {
             val bloques = ceil(seg.coerceAtLeast(1) / 1800.0).toInt().coerceAtLeast(1)
             val minCobro = bloques * 30
+            val totalEstMins = acum + minCobro
+            val valorEst = calcularValorSesion(id, totalEstMins)
             txtTitulo.text = "⏱️ $nombre (LIBRE)"
-            txtSubIp?.text = if (bloqueada) "🔒 Libre: $minCobro min" else "Libre actual: $minCobro min • Previo: ${acum}m"
+            txtSubIp?.text = if (bloqueada) {
+                "🔒 Libre: ${formatearEnHoras(totalEstMins)} (${formatearMoneda(valorEst)})"
+            } else {
+                "Libre: ${formatearEnHoras(totalEstMins)} • ${formatearMoneda(valorEst)}"
+            }
             txtReloj.setTextColor(Color.parseColor("#38BDF8"))
         } else {
             txtTitulo.text = "🟢 $nombre"
-            val infoAcum = if (acum > 0) " • Sesión: ${acum}m" else ""
+            val infoAcum = if (acum > 0) {
+                " • ${formatearEnHoras(acum)} (${formatearMoneda(calcularValorSesion(id, acum))})"
+            } else {
+                ""
+            }
             txtSubIp?.text = if (bloqueada) "IP: $ip • 🔒 Bloqueada$infoAcum" else "IP: $ip$infoAcum"
             txtReloj.setTextColor(
                 when {
