@@ -68,7 +68,13 @@ class MainActivity : AppCompatActivity() {
         }
 
         construirTarjetas()
+        sincronizarAhoraEnParalelo()
         iniciarRefrescoVisual()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        sincronizarAhoraEnParalelo()
     }
 
     private fun dp(valor: Int): Int {
@@ -178,7 +184,7 @@ class MainActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             }
             val txtNombre = TextView(this).apply {
-                text = "🔴 ${obtenerNombre(i)}"
+                text = if (EstadoSala.online[i]) "🟢 ${obtenerNombre(i)}" else "🔴 ${obtenerNombre(i)}"
                 textSize = 18f
                 setTypeface(null, Typeface.BOLD)
                 setTextColor(Color.WHITE)
@@ -367,6 +373,37 @@ class MainActivity : AppCompatActivity() {
             card.addView(panelExtra)
             card.addView(btnToggle)
             contenedorTvs.addView(card)
+            pintarTarjeta(i)
+        }
+    }
+
+    private fun sincronizarAhoraEnParalelo() {
+        lifecycleScope.launch {
+            (1..EstadoSala.NUM_TVS).map { id ->
+                async {
+                    val ip = obtenerIp(id)
+                    val salida = AdbManager.ejecutar(
+                        this@MainActivity,
+                        ip,
+                        "cat /sdcard/Download/sala_fin.txt 2>/dev/null; echo '|'; date +%s",
+                        esAccionManual = true
+                    )
+                    if (salida != null) {
+                        EstadoSala.online[id] = true
+                        val partes = salida.split("|")
+                        val ahora = partes.getOrNull(1)?.trim()?.toLongOrNull() ?: 0L
+                        val fin = partes.getOrNull(0)?.trim()?.toLongOrNull() ?: 0L
+                        if (ahora > 1700000000L && fin > ahora) {
+                            EstadoSala.segundos[id] = (fin - ahora).toInt()
+                        } else if (fin == 0L) {
+                            EstadoSala.segundos[id] = 0
+                        }
+                    } else {
+                        EstadoSala.online[id] = false
+                    }
+                    pintarTarjeta(id)
+                }
+            }.awaitAll()
         }
     }
 
@@ -403,6 +440,7 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("Guardar") { _, _ ->
                 guardarConfig(id, inputNombre.text.toString().trim(), inputIp.text.toString().trim())
                 construirTarjetas()
+                sincronizarAhoraEnParalelo()
             }
             .setNegativeButton("Cancelar", null)
             .show()
@@ -411,7 +449,12 @@ class MainActivity : AppCompatActivity() {
     private fun enviarTeclaRapida(id: Int, keycode: Int) {
         lifecycleScope.launch {
             val res = AdbManager.ejecutar(this@MainActivity, obtenerIp(id), "input keyevent $keycode", esAccionManual = true)
-            if (res == null) {
+            if (res != null) {
+                EstadoSala.online[id] = true
+                pintarTarjeta(id)
+            } else {
+                EstadoSala.online[id] = false
+                pintarTarjeta(id)
                 Toast.makeText(this@MainActivity, "${obtenerNombre(id)} sin conexión", Toast.LENGTH_SHORT).show()
             }
         }
@@ -422,6 +465,8 @@ class MainActivity : AppCompatActivity() {
             val ip = obtenerIp(id)
             val res = AdbManager.ejecutar(this@MainActivity, ip, "input keyevent 224", esAccionManual = true)
             if (res != null) {
+                EstadoSala.online[id] = true
+                pintarTarjeta(id)
                 Toast.makeText(this@MainActivity, "Encendiendo ${obtenerNombre(id)}...", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(this@MainActivity, "TV en reposo profundo (usa el control físico)", Toast.LENGTH_SHORT).show()
@@ -435,6 +480,7 @@ class MainActivity : AppCompatActivity() {
             val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt"
             val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
             if (res != null) {
+                EstadoSala.online[id] = true
                 EstadoSala.segundos[id] = 0
                 pintarTarjeta(id)
                 Toast.makeText(this@MainActivity, "Timer quitado en ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
@@ -450,6 +496,7 @@ class MainActivity : AppCompatActivity() {
             val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; input keyevent 26"
             val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
             if (res != null) {
+                EstadoSala.online[id] = true
                 EstadoSala.segundos[id] = 0
                 pintarTarjeta(id)
                 Toast.makeText(this@MainActivity, "Apagando ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
@@ -469,6 +516,8 @@ class MainActivity : AppCompatActivity() {
                 esAccionManual = true
             )
             if (salida == null) {
+                EstadoSala.online[id] = false
+                pintarTarjeta(id)
                 Toast.makeText(this@MainActivity, "${obtenerNombre(id)} sin conexión", Toast.LENGTH_SHORT).show()
                 return@launch
             }
