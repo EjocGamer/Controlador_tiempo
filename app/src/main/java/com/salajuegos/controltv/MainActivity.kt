@@ -49,7 +49,7 @@ class MainActivity : AppCompatActivity() {
         scroll.addView(root)
         setContentView(scroll)
 
-        construirTarjetas()
+        construirs()
         iniciarSincronizacionAutomatica()
     }
 
@@ -136,7 +136,7 @@ class MainActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                     setMargins(6, 0, 6, 0)
                 }
-                setOnClickListener { enviarComandoTv(i, "pkill -f 'SALA_TIMER'") }
+                setOnClickListener { enviarComandoTv(i, "pkill -f SALA_TIMER; rm -f /data/local/tmp/.sala_fin") }
             }
             val btnApagar = Button(this).apply {
                 text = "Apagar Ya"
@@ -145,9 +145,7 @@ class MainActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                     setMargins(6, 0, 6, 0)
                 }
-                setOnClickListener {
-                    enviarComandoTv(i, "pkill -f 'SALA_TIMER'; input keyevent 223")
-                }
+                setOnClickListener { enviarComandoTv(i, "pkill -f SALA_TIMER; rm -f /data/local/tmp/.sala_fin; input keyevent 223") }
             }
             filaAccion.addView(btnCancelar)
             filaAccion.addView(btnApagar)
