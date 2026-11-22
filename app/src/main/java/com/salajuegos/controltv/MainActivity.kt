@@ -18,12 +18,13 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.*
 import java.text.NumberFormat
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.ceil
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var contenedorTvs: LinearLayout
-    private val tarjetaExpandida = BooleanArray(EstadoSala.NUM_TVS + 1) { false }
+    private val tarjetaExpandida = ConcurrentHashMap<Int, Boolean>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -54,6 +55,17 @@ class MainActivity : AppCompatActivity() {
 
         contenedorTvs = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(contenedorTvs)
+
+        val btnAgregarEstacion = crearBotonGrande("➕ Agregar Estación", "#1E293B", 15f, "#38BDF8").apply {
+            setTextColor(Color.parseColor("#38BDF8"))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, dp(4), 0, dp(16)) }
+            setOnClickListener { mostrarDialogoNuevaEstacion() }
+        }
+        root.addView(btnAgregarEstacion)
+
         scroll.addView(root)
         setContentView(scroll)
 
@@ -157,6 +169,31 @@ class MainActivity : AppCompatActivity() {
             .apply()
     }
 
+    private fun eliminarEstacion(id: Int) {
+        val actuales = EstadoSala.obtenerIdsEstaciones(this).toMutableList()
+        actuales.remove(id)
+        EstadoSala.guardarIdsEstaciones(this, actuales)
+
+        getSharedPreferences("sala_tvs", Context.MODE_PRIVATE).edit()
+            .remove("nombre_$id")
+            .remove("ip_$id")
+            .remove("tarifa_15_$id")
+            .remove("tarifa_30_$id")
+            .remove("tarifa_45_$id")
+            .remove("tarifa_60_$id")
+            .remove("bloqueada_$id")
+            .remove("mins_acumulados_$id")
+            .apply()
+
+        EstadoSala.online.remove(id)
+        EstadoSala.segundos.remove(id)
+        EstadoSala.esLibre.remove(id)
+        tarjetaExpandida.remove(id)
+
+        construirTarjetas()
+        Toast.makeText(this, "Estación eliminada", Toast.LENGTH_SHORT).show()
+    }
+
     private fun calcularValorSesion(id: Int, totalMinutos: Int): Int {
         if (totalMinutos <= 0) return 0
         val p15 = obtenerTarifa15(id)
@@ -242,8 +279,24 @@ class MainActivity : AppCompatActivity() {
 
     private fun construirTarjetas() {
         contenedorTvs.removeAllViews()
-        for (i in 1..EstadoSala.NUM_TVS) {
+        val ids = EstadoSala.obtenerIdsEstaciones(this)
+
+        if (ids.isEmpty()) {
+            val vacio = TextView(this).apply {
+                text = "No hay estaciones configuradas.\nToca '+ Agregar Estación' para crear la primera."
+                textSize = 15f
+                setTextColor(Color.parseColor("#94A3B8"))
+                gravity = Gravity.CENTER
+                setPadding(dp(16), dp(32), dp(16), dp(32))
+            }
+            contenedorTvs.addView(vacio)
+            return
+        }
+
+        for (i in ids) {
             val bloqueada = estaBloqueada(i)
+            val estaOnline = EstadoSala.online[i] == true
+            val expandida = tarjetaExpandida[i] == true
 
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -260,7 +313,7 @@ class MainActivity : AppCompatActivity() {
                 tag = "card_$i"
             }
 
-            // Cabecera: Estado + Nombre + IP + Botón Candado + Botón Editar
+            // Cabecera
             val header = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -270,7 +323,7 @@ class MainActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             }
             val txtNombre = TextView(this).apply {
-                text = if (EstadoSala.online[i]) "🟢 ${obtenerNombre(i)}" else "🔴 ${obtenerNombre(i)}"
+                text = if (estaOnline) "🟢 ${obtenerNombre(i)}" else "🔴 ${obtenerNombre(i)}"
                 textSize = 18f
                 setTypeface(null, Typeface.BOLD)
                 setTextColor(Color.WHITE)
@@ -305,7 +358,7 @@ class MainActivity : AppCompatActivity() {
                 setPadding(dp(14), dp(8), dp(14), dp(8))
                 minHeight = dp(42)
                 minimumHeight = dp(42)
-                setOnClickListener { mostrarDialogoConfig(i) }
+                setOnClickListener { mostrarDialogoConfig(i, esNueva = false) }
             }
             header.addView(bloqueInfo)
             header.addView(btnCandado)
@@ -322,7 +375,7 @@ class MainActivity : AppCompatActivity() {
                 tag = "reloj_$i"
             }
 
-            // ÚNICA FILA PRINCIPAL DE TIEMPOS: +15m, +30m, +45m, +1h, +2h
+            // Fila principal de tiempos: +15m, +30m, +45m, +1h, +2h
             val filaTiempos = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             listOf(
                 Triple(15, "+15m", "#0284C7"),
@@ -339,15 +392,14 @@ class MainActivity : AppCompatActivity() {
                 filaTiempos.addView(btn)
             }
 
-            // Panel Desplegable con Tiempo Libre, Cerrar Tiempo, +1m Prueba, Audio y Energía
+            // Panel Desplegable
             val panelExtra = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                visibility = if (tarjetaExpandida[i]) View.VISIBLE else View.GONE
+                visibility = if (expandida) View.VISIBLE else View.GONE
                 setPadding(0, dp(4), 0, dp(10))
                 tag = "extra_$i"
             }
 
-            // Subfila Extra 1: Tiempo Libre, Cerrar Tiempo, +1m Prueba
             val filaSesionExtra = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             val btnIniciarLibre = crearBotonGrande(
                 "⏱️ Libre",
@@ -395,7 +447,7 @@ class MainActivity : AppCompatActivity() {
             filaSesionExtra.addView(btnCerrarTiempo)
             filaSesionExtra.addView(btn1m)
 
-            // Subfila Extra 2: Volumen (Siempre habilitado)
+            // Audio
             val filaAudio = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             val btnVolDown = crearBotonGrande("🔉 Vol -", "#1E293B", 13.5f, "#334155").apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -419,7 +471,7 @@ class MainActivity : AppCompatActivity() {
             filaAudio.addView(btnMute)
             filaAudio.addView(btnVolUp)
 
-            // Subfila Extra 3: Encender (con salto automático a HDMI 1), Quitar, Apagar
+            // Energía
             val filaEnergia = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             val btnEncender = crearBotonGrande("⚡ Encender", "#16A34A", 13f).apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -455,7 +507,7 @@ class MainActivity : AppCompatActivity() {
             panelExtra.addView(filaEnergia)
 
             val btnToggle = crearBotonGrande(
-                if (tarjetaExpandida[i]) "▲ Ocultar controles" else "▼ Más controles (Libre / Cerrar / Audio / Apagar)",
+                if (expandida) "▲ Ocultar controles" else "▼ Más controles (Libre / Cerrar / Audio / Apagar)",
                 "#1E293B",
                 12.5f,
                 "#334155"
@@ -464,9 +516,10 @@ class MainActivity : AppCompatActivity() {
                 minHeight = dp(42)
                 minimumHeight = dp(42)
                 setOnClickListener {
-                    tarjetaExpandida[i] = !tarjetaExpandida[i]
-                    panelExtra.visibility = if (tarjetaExpandida[i]) View.VISIBLE else View.GONE
-                    text = if (tarjetaExpandida[i]) "▲ Ocultar controles" else "▼ Más controles (Libre / Cerrar / Audio / Apagar)"
+                    val nuevo = !(tarjetaExpandida[i] == true)
+                    tarjetaExpandida[i] = nuevo
+                    panelExtra.visibility = if (nuevo) View.VISIBLE else View.GONE
+                    text = if (nuevo) "▲ Ocultar controles" else "▼ Más controles (Libre / Cerrar / Audio / Apagar)"
                 }
             }
 
@@ -482,7 +535,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun sincronizarAhoraEnParalelo() {
         lifecycleScope.launch {
-            (1..EstadoSala.NUM_TVS).map { id ->
+            val ids = EstadoSala.obtenerIdsEstaciones(this@MainActivity)
+            ids.map { id ->
                 async {
                     val ip = obtenerIp(id)
                     val salida = AdbManager.ejecutar(
@@ -517,7 +571,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun mostrarDialogoConfig(id: Int) {
+    private fun mostrarDialogoNuevaEstacion() {
+        val ids = EstadoSala.obtenerIdsEstaciones(this)
+        val nuevoId = (ids.maxOrNull() ?: 0) + 1
+        mostrarDialogoConfig(nuevoId, esNueva = true)
+    }
+
+    private fun mostrarDialogoConfig(id: Int, esNueva: Boolean) {
         val scrollDialog = ScrollView(this)
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -525,11 +585,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         val lblNombre = TextView(this).apply {
-            text = "Nombre de la estación (ej. PS5 - 1):"
+            text = "Nombre de la estación (ej. PS5 - $id):"
             setTypeface(null, Typeface.BOLD)
         }
         val inputNombre = EditText(this).apply {
-            setText(obtenerNombre(id))
+            setText(if (esNueva) "Estación $id" else obtenerNombre(id))
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
         }
 
@@ -539,7 +599,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(0, dp(12), 0, 0)
         }
         val inputIp = EditText(this).apply {
-            setText(obtenerIp(id))
+            setText(if (esNueva) "192.168.1.${100 + id}" else obtenerIp(id))
             inputType = InputType.TYPE_CLASS_NUMBER
             keyListener = DigitsKeyListener.getInstance("0123456789.")
         }
@@ -598,14 +658,21 @@ class MainActivity : AppCompatActivity() {
         layout.addView(input60)
         scrollDialog.addView(layout)
 
-        AlertDialog.Builder(this)
-            .setTitle("Configurar Estación $id")
+        val builder = AlertDialog.Builder(this)
+            .setTitle(if (esNueva) "➕ Nueva Estación" else "⚙️ Configurar ${obtenerNombre(id)}")
             .setView(scrollDialog)
             .setPositiveButton("Guardar") { _, _ ->
                 val t15 = input15.text.toString().trim().toIntOrNull() ?: obtenerTarifa15(id)
                 val t30 = input30.text.toString().trim().toIntOrNull() ?: obtenerTarifa30(id)
                 val t45 = input45.text.toString().trim().toIntOrNull() ?: obtenerTarifa45(id)
                 val t60 = input60.text.toString().trim().toIntOrNull() ?: obtenerTarifa60(id)
+
+                if (esNueva) {
+                    val actuales = EstadoSala.obtenerIdsEstaciones(this).toMutableList()
+                    actuales.add(id)
+                    EstadoSala.guardarIdsEstaciones(this, actuales)
+                }
+
                 guardarConfig(
                     id,
                     inputNombre.text.toString().trim(),
@@ -619,7 +686,21 @@ class MainActivity : AppCompatActivity() {
                 sincronizarAhoraEnParalelo()
             }
             .setNegativeButton("Cancelar", null)
-            .show()
+
+        if (!esNueva) {
+            builder.setNeutralButton("🗑️ Eliminar") { _, _ ->
+                AlertDialog.Builder(this)
+                    .setTitle("Eliminar ${obtenerNombre(id)}")
+                    .setMessage("¿Seguro que deseas eliminar esta estación de la lista?")
+                    .setPositiveButton("Sí, eliminar") { _, _ ->
+                        eliminarEstacion(id)
+                    }
+                    .setNegativeButton("Cancelar", null)
+                    .show()
+            }
+        }
+
+        builder.show()
     }
 
     private fun enviarTeclaRapida(id: Int, keycode: Int) {
@@ -639,13 +720,11 @@ class MainActivity : AppCompatActivity() {
     private fun encenderTv(id: Int) {
         lifecycleScope.launch {
             val ip = obtenerIp(id)
-            // 1. Despierta el TV (keyevent 224)
             val res = AdbManager.ejecutar(this@MainActivity, ip, "input keyevent 224", esAccionManual = true)
             if (res != null) {
                 EstadoSala.online[id] = true
                 pintarTarjeta(id)
                 Toast.makeText(this@MainActivity, "Encendiendo ${obtenerNombre(id)} en HDMI 1...", Toast.LENGTH_SHORT).show()
-                // 2. Espera 1.2s a que cargue la interfaz y salta directo a HDMI 1 (keyevent 243)
                 delay(1200)
                 AdbManager.ejecutar(this@MainActivity, ip, "input keyevent 243", esAccionManual = true)
             } else {
@@ -728,7 +807,6 @@ class MainActivity : AppCompatActivity() {
             val ahora = partes.getOrNull(1)?.trim()?.toLongOrNull() ?: 0L
             val minsPrevios = obtenerMinutosAcumulados(id)
 
-            // Caso 1: Estaba en Tiempo Libre (puede tener además tiempo previo comprado)
             if (inicioLibre > 1700000000L && ahora >= inicioLibre) {
                 val segLibre = (ahora - inicioLibre).toInt()
                 val bloques30 = ceil(segLibre / 1800.0).toInt().coerceAtLeast(1)
@@ -762,7 +840,6 @@ class MainActivity : AppCompatActivity() {
                 return@launch
             }
 
-            // Caso 2: Sesión con temporizador normal (acumulado de todas las veces que pidió tiempo)
             if (minsPrevios > 0) {
                 val totalValor = calcularValorSesion(id, minsPrevios)
                 AlertDialog.Builder(this@MainActivity)
@@ -842,7 +919,7 @@ class MainActivity : AppCompatActivity() {
         val txtTitulo = contenedorTvs.findViewWithTag<TextView>("titulo_$id") ?: return
         val txtSubIp = contenedorTvs.findViewWithTag<TextView>("subip_$id")
 
-        if (!EstadoSala.online[id]) {
+        if (EstadoSala.online[id] != true) {
             txtTitulo.text = "🔴 $nombre"
             txtSubIp?.text = if (bloqueada) "IP: $ip • 🔒 Bloqueada" else "IP: $ip"
             txtReloj.text = "--:--:--"
@@ -850,13 +927,13 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val seg = EstadoSala.segundos[id]
+        val seg = EstadoSala.segundos[id] ?: 0
         val h = seg / 3600
         val m = (seg % 3600) / 60
         val s = seg % 60
         txtReloj.text = String.format("%02d:%02d:%02d", h, m, s)
 
-        if (EstadoSala.esLibre[id]) {
+        if (EstadoSala.esLibre[id] == true) {
             val bloques = ceil(seg.coerceAtLeast(1) / 1800.0).toInt().coerceAtLeast(1)
             val minCobro = bloques * 30
             val totalEstMins = acum + minCobro
@@ -889,12 +966,14 @@ class MainActivity : AppCompatActivity() {
     private fun iniciarRefrescoVisual() {
         lifecycleScope.launch {
             while (isActive) {
-                for (i in 1..EstadoSala.NUM_TVS) {
-                    if (EstadoSala.online[i]) {
-                        if (EstadoSala.esLibre[i]) {
-                            EstadoSala.segundos[i] += 1
-                        } else if (EstadoSala.segundos[i] > 0) {
-                            EstadoSala.segundos[i] -= 1
+                val ids = EstadoSala.obtenerIdsEstaciones(this@MainActivity)
+                for (i in ids) {
+                    if (EstadoSala.online[i] == true) {
+                        val segActual = EstadoSala.segundos[i] ?: 0
+                        if (EstadoSala.esLibre[i] == true) {
+                            EstadoSala.segundos[i] = segActual + 1
+                        } else if (segActual > 0) {
+                            EstadoSala.segundos[i] = segActual - 1
                         }
                     }
                     pintarTarjeta(i)
