@@ -21,12 +21,11 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var crypto: AdbCrypto
     private lateinit var contenedorTvs: LinearLayout
-    private val numTvs = 6 // Configurado para 6 televisores (puedes cambiarlo)
+    private val numTvs = 6
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Inicializar llaves RSA para que el TV reconozca este teléfono siempre
         crypto = cargarOCrearLlavesAdb()
 
         val scroll = ScrollView(this).apply { setBackgroundColor(Color.parseColor("#0F172A")) }
@@ -49,7 +48,7 @@ class MainActivity : AppCompatActivity() {
         scroll.addView(root)
         setContentView(scroll)
 
-        construirs()
+        construirTarjetas()
         iniciarSincronizacionAutomatica()
     }
 
@@ -145,7 +144,9 @@ class MainActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                     setMargins(6, 0, 6, 0)
                 }
-                setOnClickListener { enviarComandoTv(i, "pkill -f SALA_TIMER; rm -f /data/local/tmp/.sala_fin; input keyevent 223") }
+                setOnClickListener {
+                    enviarComandoTv(i, "pkill -f SALA_TIMER; rm -f /data/local/tmp/.sala_fin; input keyevent 223")
+                }
             }
             filaAccion.addView(btnCancelar)
             filaAccion.addView(btnApagar)
@@ -171,12 +172,12 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-private suspend fun ejecutarAdbShell(ip: String, comando: String): String? = withContext(Dispatchers.IO) {
+    private suspend fun ejecutarAdbShell(ip: String, comando: String): String? = withContext(Dispatchers.IO) {
         var socket: Socket? = null
         var conn: AdbConnection? = null
         try {
             socket = Socket()
-            socket.soTimeout = 3000 // Evita que la lectura se quede colgada
+            socket.soTimeout = 3000
             socket.connect(InetSocketAddress(ip, 5555), 3000)
             conn = AdbConnection.create(socket, crypto)
             conn.connect()
@@ -202,6 +203,7 @@ private suspend fun ejecutarAdbShell(ip: String, comando: String): String? = wit
     private fun enviarComandoTv(id: Int, cmd: String) {
         lifecycleScope.launch {
             ejecutarAdbShell(obtenerIp(id), cmd)
+            delay(300)
             actualizarEstadoTv(id)
         }
     }
@@ -215,7 +217,6 @@ private suspend fun ejecutarAdbShell(ip: String, comando: String): String? = wit
             val totalSeg = actual + (minutosExtra * 60)
             val avisoSeg = if (totalSeg > 120) totalSeg - 120 else 0
 
-            // Usamos /data/local/tmp/ (siempre tiene permisos ADB) y todo en una sola línea con ';'
             val cmd = if (avisoSeg > 0) {
                 "pkill -f SALA_TIMER; " +
                 "NOW=\$(date +%s); FIN=\$((NOW + $totalSeg)); echo \$FIN > /data/local/tmp/.sala_fin; " +
@@ -246,15 +247,6 @@ private suspend fun ejecutarAdbShell(ip: String, comando: String): String? = wit
         return if (fin > ahora) (fin - ahora).toInt() else 0
     }
 
-    private suspend fun leerSegundosRestantes(ip: String): Int? {
-        val salida = ejecutarAdbShell(ip, "cat /data/local/tmp/.sala_fin 2>/dev/null; echo '---'; date +%s") ?: return null
-        val partes = salida.split("---")
-        if (partes.size < 2) return 0
-        val fin = partes[0].trim().toLongOrNull() ?: 0L
-        val ahora = partes[1].trim().toLongOrNull() ?: 0L
-        return if (fin > ahora) (fin - ahora).toInt() else 0
-    }
-
     private suspend fun actualizarEstadoTv(id: Int) {
         val ip = obtenerIp(id)
         val seg = leerSegundosRestantes(ip)
@@ -274,14 +266,14 @@ private suspend fun ejecutarAdbShell(ip: String, comando: String): String? = wit
             txtReloj.setTextColor(
                 when {
                     seg == 0 -> Color.parseColor("#94A3B8")
-                    seg <= 120 -> Color.parseColor("#F59E0B") // Naranja en últimos 2 min
+                    seg <= 120 -> Color.parseColor("#F59E0B")
                     else -> Color.parseColor("#22C55E")
                 }
             )
         }
     }
 
-  private fun iniciarSincronizacionAutomatica() {
+    private fun iniciarSincronizacionAutomatica() {
         lifecycleScope.launch {
             while (isActive) {
                 for (i in 1..numTvs) {
