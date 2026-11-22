@@ -16,6 +16,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.*
+import kotlin.math.ceil
 
 class MainActivity : AppCompatActivity() {
 
@@ -260,11 +261,52 @@ class MainActivity : AppCompatActivity() {
             ).forEachIndexed { idx, (mins, etiqueta, color) ->
                 val btn = crearBotonTiempoProtegido(i, mins, etiqueta, color, bloqueada).apply {
                     layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                        setMargins(if (idx == 0) 0 else dp(5), 0, if (idx == 1) 0 else dp(5), dp(12))
+                        setMargins(if (idx == 0) 0 else dp(5), 0, if (idx == 1) 0 else dp(5), dp(10))
                     }
                 }
                 filaHoras.addView(btn)
             }
+
+            // Fila Principal 3 (Tiempo Libre): Iniciar Libre / Cerrar y Redondear 30m
+            val filaLibre = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            val btnIniciarLibre = crearBotonGrande(
+                "⏱️ Tiempo Libre",
+                if (bloqueada) "#1E293B" else "#0E7490",
+                14f,
+                if (bloqueada) "#334155" else null
+            ).apply {
+                alpha = if (bloqueada) 0.45f else 1.0f
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    setMargins(0, 0, dp(5), dp(12))
+                }
+                setOnClickListener {
+                    if (estaBloqueada(i)) {
+                        Toast.makeText(this@MainActivity, "🔒 Estación bloqueada. Toca el candado para iniciar Tiempo Libre.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        iniciarTiempoLibre(i)
+                    }
+                }
+            }
+            val btnCerrarLibre = crearBotonGrande(
+                "💰 Cerrar Libre",
+                if (bloqueada) "#1E293B" else "#059669",
+                14f,
+                if (bloqueada) "#334155" else null
+            ).apply {
+                alpha = if (bloqueada) 0.45f else 1.0f
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    setMargins(dp(5), 0, 0, dp(12))
+                }
+                setOnClickListener {
+                    if (estaBloqueada(i)) {
+                        Toast.makeText(this@MainActivity, "🔒 Desbloquea la estación para cerrar Tiempo Libre.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        cerrarYCobrarTiempoLibre(i)
+                    }
+                }
+            }
+            filaLibre.addView(btnIniciarLibre)
+            filaLibre.addView(btnCerrarLibre)
 
             // Panel Desplegable con controles secundarios
             val panelExtra = LinearLayout(this).apply {
@@ -330,7 +372,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 setOnClickListener {
                     if (estaBloqueada(i)) {
-                        Toast.makeText(this@MainActivity, "🔒 Desbloquea la estación para quitar el timer.", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@MainActivity, "🔒 Desbloquea la estación para quitar el tiempo.", Toast.LENGTH_SHORT).show()
                     } else {
                         quitarTimerTv(i)
                     }
@@ -370,6 +412,7 @@ class MainActivity : AppCompatActivity() {
             card.addView(txtReloj)
             card.addView(filaMinutos)
             card.addView(filaHoras)
+            card.addView(filaLibre)
             card.addView(panelExtra)
             card.addView(btnToggle)
             contenedorTvs.addView(card)
@@ -385,17 +428,24 @@ class MainActivity : AppCompatActivity() {
                     val salida = AdbManager.ejecutar(
                         this@MainActivity,
                         ip,
-                        "cat /sdcard/Download/sala_fin.txt 2>/dev/null; echo '|'; date +%s",
+                        "cat /sdcard/Download/sala_fin.txt 2>/dev/null; echo '|'; cat /sdcard/Download/sala_libre.txt 2>/dev/null; echo '|'; date +%s",
                         esAccionManual = true
                     )
                     if (salida != null) {
                         EstadoSala.online[id] = true
                         val partes = salida.split("|")
-                        val ahora = partes.getOrNull(1)?.trim()?.toLongOrNull() ?: 0L
+                        val ahora = partes.getOrNull(2)?.trim()?.toLongOrNull() ?: 0L
+                        val inicioLibre = partes.getOrNull(1)?.trim()?.toLongOrNull() ?: 0L
                         val fin = partes.getOrNull(0)?.trim()?.toLongOrNull() ?: 0L
-                        if (ahora > 1700000000L && fin > ahora) {
+
+                        if (ahora > 1700000000L && inicioLibre > 1700000000L && ahora >= inicioLibre) {
+                            EstadoSala.esLibre[id] = true
+                            EstadoSala.segundos[id] = (ahora - inicioLibre).toInt()
+                        } else if (ahora > 1700000000L && fin > ahora) {
+                            EstadoSala.esLibre[id] = false
                             EstadoSala.segundos[id] = (fin - ahora).toInt()
-                        } else if (fin == 0L) {
+                        } else {
+                            EstadoSala.esLibre[id] = false
                             EstadoSala.segundos[id] = 0
                         }
                     } else {
@@ -477,13 +527,14 @@ class MainActivity : AppCompatActivity() {
     private fun quitarTimerTv(id: Int) {
         lifecycleScope.launch {
             val ip = obtenerIp(id)
-            val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt"
+            val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt /sdcard/Download/sala_libre.txt"
             val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
             if (res != null) {
                 EstadoSala.online[id] = true
+                EstadoSala.esLibre[id] = false
                 EstadoSala.segundos[id] = 0
                 pintarTarjeta(id)
-                Toast.makeText(this@MainActivity, "Timer quitado en ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, "Reloj reiniciado en ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(this@MainActivity, "Sin conexión con ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
             }
@@ -493,16 +544,97 @@ class MainActivity : AppCompatActivity() {
     private fun apagarTvAhora(id: Int) {
         lifecycleScope.launch {
             val ip = obtenerIp(id)
-            val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; input keyevent 26"
+            val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt /sdcard/Download/sala_libre.txt; input keyevent 26"
             val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
             if (res != null) {
                 EstadoSala.online[id] = true
+                EstadoSala.esLibre[id] = false
                 EstadoSala.segundos[id] = 0
                 pintarTarjeta(id)
                 Toast.makeText(this@MainActivity, "Apagando ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(this@MainActivity, "Sin conexión con ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+
+    private fun iniciarTiempoLibre(id: Int) {
+        lifecycleScope.launch {
+            val ip = obtenerIp(id)
+            val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; date +%s > /sdcard/Download/sala_libre.txt"
+            val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
+            if (res != null) {
+                EstadoSala.online[id] = true
+                EstadoSala.esLibre[id] = true
+                EstadoSala.segundos[id] = 0
+                pintarTarjeta(id)
+                Toast.makeText(this@MainActivity, "⏱️ Tiempo Libre iniciado en ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
+            } else {
+                EstadoSala.online[id] = false
+                pintarTarjeta(id)
+                Toast.makeText(this@MainActivity, "${obtenerNombre(id)} sin conexión", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun cerrarYCobrarTiempoLibre(id: Int) {
+        lifecycleScope.launch {
+            val ip = obtenerIp(id)
+            val salida = AdbManager.ejecutar(
+                this@MainActivity,
+                ip,
+                "cat /sdcard/Download/sala_libre.txt 2>/dev/null; echo '|'; date +%s",
+                esAccionManual = true
+            )
+            if (salida == null) {
+                Toast.makeText(this@MainActivity, "${obtenerNombre(id)} sin conexión", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+
+            val partes = salida.split("|")
+            val inicio = partes.getOrNull(0)?.trim()?.toLongOrNull() ?: 0L
+            val ahora = partes.getOrNull(1)?.trim()?.toLongOrNull() ?: 0L
+
+            if (inicio < 1700000000L || ahora < inicio) {
+                Toast.makeText(this@MainActivity, "${obtenerNombre(id)} no está en Tiempo Libre", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+
+            val segJugados = (ahora - inicio).toInt()
+            val minReales = ceil(segJugados / 60.0).toInt().coerceAtLeast(1)
+            val bloques30 = ceil(segJugados / 1800.0).toInt().coerceAtLeast(1)
+            val minACobrar = bloques30 * 30
+
+            val hReal = segJugados / 3600
+            val mReal = (segJugados % 3600) / 60
+            val sReal = segJugados % 60
+            val textoReal = String.format("%02d:%02d:%02d", hReal, mReal, sReal)
+
+            val textoCobro = if (minACobrar % 60 == 0) {
+                "${minACobrar / 60} Hora(s)"
+            } else {
+                "${minACobrar / 60}h ${minACobrar % 60}min"
+            }
+
+            AlertDialog.Builder(this@MainActivity)
+                .setTitle("💰 Cerrar Tiempo Libre • ${obtenerNombre(id)}")
+                .setMessage(
+                    "Tiempo real jugado: $textoReal ($minReales min)\n\n" +
+                    "Tiempo redondeado a cobrar (bloques 30m):\n" +
+                    "👉 $textoCobro ($minACobrar minutos)\n\n" +
+                    "¿Confirmar cierre?"
+                )
+                .setPositiveButton("Confirmar y Cerrar") { _, _ ->
+                    lifecycleScope.launch {
+                        AdbManager.ejecutar(this@MainActivity, ip, "rm -f /sdcard/Download/sala_libre.txt", esAccionManual = true)
+                        EstadoSala.esLibre[id] = false
+                        EstadoSala.segundos[id] = 0
+                        pintarTarjeta(id)
+                        Toast.makeText(this@MainActivity, "Sesión cerrada ($textoCobro)", Toast.LENGTH_LONG).show()
+                    }
+                }
+                .setNegativeButton("Seguir jugando", null)
+                .show()
         }
     }
 
@@ -528,10 +660,11 @@ class MainActivity : AppCompatActivity() {
             val baseSegundos = if (ahora > 1700000000L && finActual > ahora) (finActual - ahora).toInt() else 0
 
             val totalSeg = baseSegundos + (minutosExtra * 60)
-            val cmd = "FIN=\$((\$(date +%s) + $totalSeg)); echo \$FIN > /sdcard/Download/sala_fin.txt"
+            val cmd = "rm -f /sdcard/Download/sala_libre.txt; FIN=\$((\$(date +%s) + $totalSeg)); echo \$FIN > /sdcard/Download/sala_fin.txt"
             val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
             if (res != null) {
                 EstadoSala.online[id] = true
+                EstadoSala.esLibre[id] = false
                 EstadoSala.segundos[id] = totalSeg
                 pintarTarjeta(id)
                 Toast.makeText(this@MainActivity, "+${minutosExtra}m en ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
@@ -547,19 +680,29 @@ class MainActivity : AppCompatActivity() {
         val txtTitulo = contenedorTvs.findViewWithTag<TextView>("titulo_$id") ?: return
         val txtSubIp = contenedorTvs.findViewWithTag<TextView>("subip_$id")
 
-        txtSubIp?.text = if (bloqueada) "IP: $ip • 🔒 Tiempos bloqueados" else "IP: $ip"
-
         if (!EstadoSala.online[id]) {
             txtTitulo.text = "🔴 $nombre"
+            txtSubIp?.text = if (bloqueada) "IP: $ip • 🔒 Bloqueada" else "IP: $ip"
             txtReloj.text = "--:--:--"
             txtReloj.setTextColor(Color.parseColor("#EF4444"))
+            return
+        }
+
+        val seg = EstadoSala.segundos[id]
+        val h = seg / 3600
+        val m = (seg % 3600) / 60
+        val s = seg % 60
+        txtReloj.text = String.format("%02d:%02d:%02d", h, m, s)
+
+        if (EstadoSala.esLibre[id]) {
+            val bloques = ceil(seg.coerceAtLeast(1) / 1800.0).toInt().coerceAtLeast(1)
+            val minCobro = bloques * 30
+            txtTitulo.text = "⏱️ $nombre (LIBRE)"
+            txtSubIp?.text = if (bloqueada) "🔒 Cobro redondeado: $minCobro min" else "IP: $ip • Cobro redondeado: $minCobro min"
+            txtReloj.setTextColor(Color.parseColor("#38BDF8"))
         } else {
             txtTitulo.text = "🟢 $nombre"
-            val seg = EstadoSala.segundos[id]
-            val h = seg / 3600
-            val m = (seg % 3600) / 60
-            val s = seg % 60
-            txtReloj.text = String.format("%02d:%02d:%02d", h, m, s)
+            txtSubIp?.text = if (bloqueada) "IP: $ip • 🔒 Tiempos bloqueados" else "IP: $ip"
             txtReloj.setTextColor(
                 when {
                     seg == 0 -> Color.parseColor("#94A3B8")
@@ -574,8 +717,12 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             while (isActive) {
                 for (i in 1..EstadoSala.NUM_TVS) {
-                    if (EstadoSala.online[i] && EstadoSala.segundos[i] > 0) {
-                        EstadoSala.segundos[i] -= 1
+                    if (EstadoSala.online[i]) {
+                        if (EstadoSala.esLibre[i]) {
+                            EstadoSala.segundos[i] += 1
+                        } else if (EstadoSala.segundos[i] > 0) {
+                            EstadoSala.segundos[i] -= 1
+                        }
                     }
                     pintarTarjeta(i)
                 }
