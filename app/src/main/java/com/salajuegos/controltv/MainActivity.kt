@@ -325,21 +325,28 @@ class MainActivity : AppCompatActivity() {
             }
 
             val totalSeg = actual + (minutosExtra * 60)
-            val avisoSeg = if (totalSeg > 120) totalSeg - 120 else 0
 
-            // Aviso visual doble faltando 2 min: notificación del sistema + pulso visual de volumen en pantalla
-            val accionAviso = "cmd notification post -S bigtext -t 'EjocGames' 'alerta_tv' 'Quedan 2 minutos de juego' >/dev/null 2>&1; input keyevent 25; sleep 1; input keyevent 24"
-
-            val scriptSegundoPlano = if (avisoSeg > 0) {
-                "sleep $avisoSeg; $accionAviso; sleep 119; rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; input keyevent 26"
-            } else {
-                "sleep $totalSeg; rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; input keyevent 26"
-            }
+            // Script desacoplado con setsid que vigila el reloj real (date +%s) cada 5 segundos
+            // Así no depende de un sleep largo ni muere al cerrarse la sesión ADB
+            val loopVigilancia = "AVISO=0; " +
+                "while [ -f /sdcard/Download/sala_fin.txt ]; do " +
+                "FIN=\$(cat /sdcard/Download/sala_fin.txt 2>/dev/null); " +
+                "NOW=\$(date +%s); " +
+                "REST=\$((FIN - NOW)); " +
+                "if [ \$REST -le 120 ] && [ \$REST -gt 0 ] && [ \$AVISO -eq 0 ]; then " +
+                "AVISO=1; cmd notification post -S bigtext -t 'EjocGames' 'alerta_tv' 'Quedan 2 minutos de juego' >/dev/null 2>&1; input keyevent 25; sleep 1; input keyevent 24; " +
+                "fi; " +
+                "if [ \$REST -le 0 ]; then " +
+                "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; " +
+                "input keyevent 26; " +
+                "break; " +
+                "fi; " +
+                "sleep 5; " +
+                "done"
 
             val cmd = "kill -9 \$(cat /sdcard/Download/sala_pid.txt 2>/dev/null) 2>/dev/null; " +
-                      "killall sleep 2>/dev/null; " +
                       "FIN=\$((\$(date +%s) + $totalSeg)); echo \$FIN > /sdcard/Download/sala_fin.txt; " +
-                      "nohup sh -c \"$scriptSegundoPlano\" >/dev/null 2>&1 & echo \$! > /sdcard/Download/sala_pid.txt"
+                      "setsid sh -c \"$loopVigilancia\" </dev/null >/dev/null 2>&1 & echo \$! > /sdcard/Download/sala_pid.txt"
 
             val res = ejecutarAdbShell(ip, cmd)
             if (res != null) {
