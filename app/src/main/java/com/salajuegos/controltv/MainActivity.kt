@@ -20,11 +20,7 @@ import kotlinx.coroutines.*
 class MainActivity : AppCompatActivity() {
 
     private lateinit var contenedorTvs: LinearLayout
-    private val numTvs = 6
-
-    private val segundosLocales = IntArray(numTvs + 1) { 0 }
-    private val estadoOnline = BooleanArray(numTvs + 1) { false }
-    private val tarjetaExpandida = BooleanArray(numTvs + 1) { false }
+    private val tarjetaExpandida = BooleanArray(EstadoSala.NUM_TVS + 1) { false }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -72,8 +68,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         construirTarjetas()
-        iniciarRelojVisual()
-        iniciarSincronizacionTv()
+        iniciarRefrescoVisual()
     }
 
     private fun dp(valor: Int): Int {
@@ -125,7 +120,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun construirTarjetas() {
         contenedorTvs.removeAllViews()
-        for (i in 1..numTvs) {
+        for (i in 1..EstadoSala.NUM_TVS) {
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 background = crearFondoRedondeado("#162032", 18f, "#26354D")
@@ -334,7 +329,6 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("Guardar") { _, _ ->
                 guardarConfig(id, inputNombre.text.toString().trim(), inputIp.text.toString().trim())
                 construirTarjetas()
-                lifecycleScope.launch { actualizarUnTv(id) }
             }
             .setNegativeButton("Cancelar", null)
             .show()
@@ -367,7 +361,7 @@ class MainActivity : AppCompatActivity() {
             val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt"
             val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
             if (res != null) {
-                segundosLocales[id] = 0
+                EstadoSala.segundos[id] = 0
                 pintarTarjeta(id)
                 Toast.makeText(this@MainActivity, "Timer quitado en ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
             } else {
@@ -379,10 +373,10 @@ class MainActivity : AppCompatActivity() {
     private fun apagarTvAhora(id: Int) {
         lifecycleScope.launch {
             val ip = obtenerIp(id)
-            AdbManager.ejecutar(this@MainActivity, ip, "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt", esAccionManual = true)
-            val res = AdbManager.ejecutar(this@MainActivity, ip, "input keyevent 26", esAccionManual = true)
+            val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; input keyevent 26"
+            val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
             if (res != null) {
-                segundosLocales[id] = 0
+                EstadoSala.segundos[id] = 0
                 pintarTarjeta(id)
                 Toast.makeText(this@MainActivity, "Apagando ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
             } else {
@@ -394,42 +388,32 @@ class MainActivity : AppCompatActivity() {
     private fun sumarTiempoTv(id: Int, minutosExtra: Int) {
         lifecycleScope.launch {
             val ip = obtenerIp(id)
-            val actual = leerSegundosRestantes(ip, esAccionManual = true)
-            if (actual == null) {
+            val salida = AdbManager.ejecutar(
+                this@MainActivity,
+                ip,
+                "cat /sdcard/Download/sala_fin.txt 2>/dev/null; echo '|'; date +%s",
+                esAccionManual = true
+            )
+            if (salida == null) {
                 Toast.makeText(this@MainActivity, "${obtenerNombre(id)} sin conexión", Toast.LENGTH_SHORT).show()
                 return@launch
             }
 
-            val baseSegundos = if (actual >= 0) actual else segundosLocales[id]
-            val totalSeg = baseSegundos + (minutosExtra * 60)
+            val partes = salida.split("|")
+            val ahora = partes.getOrNull(1)?.trim()?.toLongOrNull() ?: 0L
+            val finActual = partes.getOrNull(0)?.trim()?.toLongOrNull() ?: 0L
+            val baseSegundos = if (ahora > 1700000000L && finActual > ahora) (finActual - ahora).toInt() else 0
 
+            val totalSeg = baseSegundos + (minutosExtra * 60)
             val cmd = "FIN=\$((\$(date +%s) + $totalSeg)); echo \$FIN > /sdcard/Download/sala_fin.txt"
             val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
             if (res != null) {
-                segundosLocales[id] = totalSeg
-                estadoOnline[id] = true
+                EstadoSala.online[id] = true
+                EstadoSala.segundos[id] = totalSeg
                 pintarTarjeta(id)
                 Toast.makeText(this@MainActivity, "+${minutosExtra}m en ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
             }
         }
-    }
-
-    private suspend fun leerSegundosRestantes(ip: String, esAccionManual: Boolean = false): Int? {
-        val salida = AdbManager.ejecutar(ip = ip, context = this, comando = "cat /sdcard/Download/sala_fin.txt 2>/dev/null; echo '|'; date +%s", esAccionManual = esAccionManual) ?: return null
-        val partes = salida.split("|")
-        if (partes.size < 2) return -1
-
-        val ahora = partes[1].trim().toLongOrNull() ?: return -1
-        if (ahora < 1700000000L) return -1
-
-        val textoFin = partes[0].trim()
-        if (textoFin.isEmpty()) return 0
-
-        val fin = textoFin.toLongOrNull() ?: return -1
-        val diff = (fin - ahora).toInt()
-
-        if (diff > 86400) return -1
-        return if (diff > 0) diff else 0
     }
 
     private fun pintarTarjeta(id: Int) {
@@ -441,13 +425,13 @@ class MainActivity : AppCompatActivity() {
 
         txtSubIp?.text = "IP: $ip"
 
-        if (!estadoOnline[id]) {
+        if (!EstadoSala.online[id]) {
             txtTitulo.text = "🔴 $nombre"
             txtReloj.text = "--:--:--"
             txtReloj.setTextColor(Color.parseColor("#EF4444"))
         } else {
             txtTitulo.text = "🟢 $nombre"
-            val seg = segundosLocales[id]
+            val seg = EstadoSala.segundos[id]
             val h = seg / 3600
             val m = (seg % 3600) / 60
             val s = seg % 60
@@ -462,41 +446,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private suspend fun actualizarUnTv(id: Int) {
-        val seg = leerSegundosRestantes(obtenerIp(id))
-        if (seg == null) {
-            estadoOnline[id] = false
-        } else {
-            estadoOnline[id] = true
-            if (seg >= 0) {
-                segundosLocales[id] = seg
-            }
-        }
-        pintarTarjeta(id)
-    }
-
-    private fun iniciarRelojVisual() {
+    private fun iniciarRefrescoVisual() {
         lifecycleScope.launch {
             while (isActive) {
-                delay(1000)
-                for (i in 1..numTvs) {
-                    if (estadoOnline[i] && segundosLocales[i] > 0) {
-                        segundosLocales[i] -= 1
-                        pintarTarjeta(i)
+                for (i in 1..EstadoSala.NUM_TVS) {
+                    if (EstadoSala.online[i] && EstadoSala.segundos[i] > 0) {
+                        EstadoSala.segundos[i] -= 1
                     }
+                    pintarTarjeta(i)
                 }
-            }
-        }
-    }
-
-    private fun iniciarSincronizacionTv() {
-        lifecycleScope.launch {
-            while (isActive) {
-                val tareas = (1..numTvs).map { id ->
-                    async { actualizarUnTv(id) }
-                }
-                tareas.awaitAll()
-                delay(5000)
+                delay(1000)
             }
         }
     }
