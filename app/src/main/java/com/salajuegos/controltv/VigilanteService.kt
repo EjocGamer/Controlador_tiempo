@@ -8,59 +8,42 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
-import android.util.Base64
 import androidx.core.app.NotificationCompat
-import com.tananaev.adblib.AdbBase64
-import com.tananaev.adblib.AdbConnection
-import com.tananaev.adblib.AdbCrypto
 import kotlinx.coroutines.*
-import java.io.File
-import java.net.InetSocketAddress
-import java.net.Socket
+import org.json.JSONArray
+import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class VigilanteService : Service() {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val numTvs = 6
     private val avisoEnviado = BooleanArray(numTvs + 1) { false }
-    private val tiemposActivos = IntArray(numTvs + 1) { -1 } // -1 = sin tiempo/desconectado
+    private val estadoTextoNotif = Array(numTvs + 1) { "" }
 
     override fun onCreate() {
         super.onCreate()
-        val base64 = AdbBase64 { data -> Base64.encodeToString(data, Base64.NO_WRAP) }
-        val pubFile = File(filesDir, "adb_pub.key")
-        val privFile = File(filesDir, "adb_priv.key")
-        crypto = if (pubFile.exists() && privFile.exists()) {
-            AdbCrypto.loadAdbKeyPair(base64, privFile, pubFile)
-        } else {
-            AdbCrypto.generateAdbKeyPair(base64).apply { saveAdbKeyPair(privFile, pubFile) }
-        }
-
         crearCanalesNotificacion()
         actualizarNotificacionEnVivo("Iniciando supervisión de pantallas...")
         iniciarBucleVigilancia()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // START_STICKY hace que Android reinicie el servicio automáticamente si se libera memoria
         return START_STICKY
     }
 
     private fun crearCanalesNotificacion() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(NotificationManager::class.java)
-
-            // Canal 1: Panel en vivo silencioso con los tiempos restantes
             val canalServicio = NotificationChannel(
                 "ejoc_vigilante",
                 "Panel de Tiempos en Vivo",
                 NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                setShowBadge(false)
-            }
+            ).apply { setShowBadge(false) }
             nm.createNotificationChannel(canalServicio)
 
-            // Canal 2: Alerta urgente cuando faltan 2 minutos (sonido + vibración + banner)
             val canalAlertas = NotificationChannel(
                 "ejoc_alertas_2min",
                 "Avisos de Tiempo por Vencer (2 min)",
@@ -120,6 +103,25 @@ class VigilanteService : Service() {
         nm.notify(200 + id, alerta)
     }
 
+    private fun registrarSesionValidadaEnReporte(nombreEstacion: String, minutosTotales: Int, etiquetaPlan: String) {
+        if (minutosTotales <= 0) return
+        val prefs = getSharedPreferences("ejoc_reportes", Context.MODE_PRIVATE)
+        val fechaHoy = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val clave = "sesiones_$fechaHoy"
+
+        val actualStr = prefs.getString(clave, "[]") ?: "[]"
+        val array = try { JSONArray(actualStr) } catch (_: Exception) { JSONArray() }
+
+        val obj = JSONObject().apply {
+            put("estacion", nombreEstacion)
+            put("minutos", minutosTotales)
+            put("plan", etiquetaPlan)
+            put("hora", SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()))
+        }
+        array.put(obj)
+        prefs.edit().putString(clave, array.toString()).apply()
+    }
+
     private fun iniciarBucleVigilancia() {
         scope.launch {
             while (isActive) {
@@ -133,21 +135,7 @@ class VigilanteService : Service() {
                 }
                 tareas.awaitAll()
 
-                // Construir el resumen en tiempo real para la barra de notificaciones
-                val lineas = mutableListOf<String>()
-                for (id in 1..numTvs) {
-                    val seg = tiemposActivos[id]
-                    if (seg > 0) {
-                        val nombre = prefs.getString("nombre_$id", "Estación $id") ?: "Estación $id"
-                        val h = seg / 3600
-                        val m = (seg % 3600) / 60
-                        val s = seg % 60
-                        val reloj = if (h > 0) String.format("%dh %02dm %02ds", h, m, s) else String.format("%02dm %02ds", m, s)
-                        val icono = if (seg <= 120) "⚠️" else "🟢"
-                        lineas.add("$icono $nombre: $reloj")
-                    }
-                }
-
+                val lineas = estadoTextoNotif.filter { it.isNotEmpty() }
                 val textoFinal = if (lineas.isEmpty()) {
                     "Ninguna estación con tiempo activo"
                 } else {
@@ -155,7 +143,7 @@ class VigilanteService : Service() {
                 }
                 actualizarNotificacionEnVivo(textoFinal)
 
-                delay(2000)
+                delay(5000)
             }
         }
     }
@@ -163,19 +151,36 @@ class VigilanteService : Service() {
     private suspend fun verificarYControlarTv(id: Int, nombre: String, ip: String) {
         val salida = AdbManager.ejecutar(this, ip, "cat /sdcard/Download/sala_fin.txt 2>/dev/null; echo '|'; cat /sdcard/Download/sala_libre.txt 2>/dev/null; echo '|'; date +%s")
         if (salida == null) {
-            tiemposActivos[id] = -1
+            estadoTextoNotif[id] = ""
             return
         }
         val partes = salida.split("|")
-        if (partes.size < 2) return
+        if (partes.size < 3) return
 
-        val ahora = partes[1].trim().toLongOrNull() ?: return
+        val ahora = partes[2].trim().toLongOrNull() ?: return
         if (ahora < 1700000000L) return
 
         val textoFin = partes[0].trim()
+        val textoLibre = partes[1].trim()
+
+        // 1. Verificar Modo Tiempo Libre
+        if (textoLibre.isNotEmpty()) {
+            val inicioLibre = textoLibre.toLongOrNull() ?: 0L
+            if (inicioLibre > 1700000000L && ahora >= inicioLibre) {
+                val transcurrido = (ahora - inicioLibre).toInt()
+                val h = transcurrido / 3600
+                val m = (transcurrido % 3600) / 60
+                val s = transcurrido % 60
+                val reloj = if (h > 0) String.format("%dh %02dm %02ds", h, m, s) else String.format("%02dm %02ds", m, s)
+                estadoTextoNotif[id] = "⏱️ $nombre (Libre): $reloj"
+                return
+            }
+        }
+
+        // 2. Verificar Modo Temporizador normal
         if (textoFin.isEmpty()) {
             avisoEnviado[id] = false
-            tiemposActivos[id] = 0
+            estadoTextoNotif[id] = ""
             return
         }
 
@@ -183,26 +188,55 @@ class VigilanteService : Service() {
         val restante = (fin - ahora).toInt()
         if (restante > 86400) return
 
-        tiemposActivos[id] = if (restante > 0) restante else 0
+        if (restante > 0) {
+            val h = restante / 3600
+            val m = (restante % 3600) / 60
+            val s = restante % 60
+            val reloj = if (h > 0) String.format("%dh %02dm %02ds", h, m, s) else String.format("%02dm %02ds", m, s)
+            val icono = if (restante <= 120) "⚠️" else "🟢"
+            estadoTextoNotif[id] = "$icono $nombre: $reloj"
+        } else {
+            estadoTextoNotif[id] = ""
+        }
 
         if (restante > 120) {
             avisoEnviado[id] = false
         }
 
-        // Faltando 2 minutos: notificación sonora/vibración en el teléfono
+        // Al llegar a los últimos 2 minutos: alerta al dependiente y valida la sesión en el reporte diario
         if (restante in 1..120 && !avisoEnviado[id]) {
             avisoEnviado[id] = true
             lanzarAlertaDependiente(id, nombre, restante)
+
+            val prefs = getSharedPreferences("sala_tvs", Context.MODE_PRIVATE)
+            val minsAcumulados = prefs.getInt("mins_sesion_$id", 0)
+            val yaValidada = prefs.getBoolean("validada_sesion_$id", false)
+            if (minsAcumulados > 0 && !yaValidada) {
+                prefs.edit().putBoolean("validada_sesion_$id", true).apply()
+                val etiqueta = formatearPlan(minsAcumulados)
+                registrarSesionValidadaEnReporte(nombre, minsAcumulados, etiqueta)
+            }
         }
 
-        // Tiempo agotado: borra archivo y apaga el TV inmediatamente
+        // Tiempo agotado: borra archivos, limpia sesión y apaga el TV
         if (restante <= 0) {
             avisoEnviado[id] = false
-            tiemposActivos[id] = 0
+            estadoTextoNotif[id] = ""
+            getSharedPreferences("sala_tvs", Context.MODE_PRIVATE).edit()
+                .putInt("mins_sesion_$id", 0)
+                .putBoolean("validada_sesion_$id", false)
+                .apply()
             AdbManager.ejecutar(this, ip, "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; input keyevent 26")
         }
     }
 
+    private fun formatearPlan(mins: Int): String {
+        return when {
+            mins < 60 -> "$mins min"
+            mins % 60 == 0 -> "${mins / 60} h"
+            else -> "${mins / 60}h ${mins % 60}m"
+        }
+    }
 
     override fun onDestroy() {
         scope.cancel()
