@@ -211,45 +211,50 @@ private suspend fun ejecutarAdbShell(ip: String, comando: String): String? = wit
     private fun sumarTiempoTv(id: Int, minutosExtra: Int) {
         lifecycleScope.launch {
             val ip = obtenerIp(id)
+            Toast.makeText(this@MainActivity, "Enviando +${minutosExtra}m al TV $id...", Toast.LENGTH_SHORT).show()
+
             val actual = leerSegundosRestantes(ip) ?: 0
             val totalSeg = actual + (minutosExtra * 60)
-
-            // Script dentro del TV:
-            // 1. Guarda la hora exacta de apagado en /sdcard/.sala_fin
-            // 2. Si faltan > 2 min, espera hasta 2 min antes y lanza notificación flotante en el TV
-            // 3. Al cumplirse el tiempo, suspende la pantalla (keyevent 223)
             val avisoSeg = if (totalSeg > 120) totalSeg - 120 else 0
-            val script = if (avisoSeg > 0) {
-                "pkill -f 'SALA_TIMER'; " +
-                "echo \$((\$(date +%s) + $totalSeg)) > /sdcard/.sala_fin; " +
-                "nohup sh -c 'sleep $avisoSeg # SALA_TIMER\n" +
-                "am broadcast -a android.intent.action.SHOW_TOAST --es message \"⚠️ Quedan 2 minutos de juego\" >/dev/null 2>&1 || cmd statusbar expand-notifications\n" +
-                "sleep 120\n" +
-                "rm -f /sdcard/.sala_fin\n" +
-                "input keyevent 223' >/dev/null 2>&1 &"
+
+            // Usamos /data/local/tmp/ (siempre tiene permisos ADB) y todo en una sola línea con ';'
+            val cmd = if (avisoSeg > 0) {
+                "pkill -f SALA_TIMER; " +
+                "NOW=\$(date +%s); FIN=\$((NOW + $totalSeg)); echo \$FIN > /data/local/tmp/.sala_fin; " +
+                "(sleep $avisoSeg; cmd notification post -S bigtext -t 'Sala de Juegos' 'alerta_tv' 'Quedan 2 minutos de juego' >/dev/null 2>&1; sleep 120; rm -f /data/local/tmp/.sala_fin; input keyevent 223) >/dev/null 2>&1 & # SALA_TIMER"
             } else {
-                "pkill -f 'SALA_TIMER'; " +
-                "echo \$((\$(date +%s) + $totalSeg)) > /sdcard/.sala_fin; " +
-                "nohup sh -c 'sleep $totalSeg # SALA_TIMER\n" +
-                "rm -f /sdcard/.sala_fin\n" +
-                "input keyevent 223' >/dev/null 2>&1 &"
+                "pkill -f SALA_TIMER; " +
+                "NOW=\$(date +%s); FIN=\$((NOW + $totalSeg)); echo \$FIN > /data/local/tmp/.sala_fin; " +
+                "(sleep $totalSeg; rm -f /data/local/tmp/.sala_fin; input keyevent 223) >/dev/null 2>&1 & # SALA_TIMER"
             }
 
-            ejecutarAdbShell(ip, script)
+            val res = ejecutarAdbShell(ip, cmd)
+            if (res != null) {
+                Toast.makeText(this@MainActivity, "Tiempo agregado al TV $id", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this@MainActivity, "Error: el TV $id no respondió", Toast.LENGTH_SHORT).show()
+            }
+            delay(500)
             actualizarEstadoTv(id)
         }
     }
 
     private suspend fun leerSegundosRestantes(ip: String): Int? {
-        val salida = ejecutarAdbShell(ip, "cat /sdcard/.sala_fin 2>/dev/null; date +%s") ?: return null
-        val lineas = salida.trim().lines().filter { it.isNotBlank() }
-        return if (lineas.size >= 2) {
-            val fin = lineas[0].trim().toLongOrNull() ?: 0L
-            val ahora = lineas[1].trim().toLongOrNull() ?: 0L
-            maxOf(0, (fin - ahora).toInt())
-        } else {
-            0
-        }
+        val salida = ejecutarAdbShell(ip, "cat /data/local/tmp/.sala_fin 2>/dev/null; echo '---'; date +%s") ?: return null
+        val partes = salida.split("---")
+        if (partes.size < 2) return 0
+        val fin = partes[0].trim().toLongOrNull() ?: 0L
+        val ahora = partes[1].trim().toLongOrNull() ?: 0L
+        return if (fin > ahora) (fin - ahora).toInt() else 0
+    }
+
+    private suspend fun leerSegundosRestantes(ip: String): Int? {
+        val salida = ejecutarAdbShell(ip, "cat /data/local/tmp/.sala_fin 2>/dev/null; echo '---'; date +%s") ?: return null
+        val partes = salida.split("---")
+        if (partes.size < 2) return 0
+        val fin = partes[0].trim().toLongOrNull() ?: 0L
+        val ahora = partes[1].trim().toLongOrNull() ?: 0L
+        return if (fin > ahora) (fin - ahora).toInt() else 0
     }
 
     private suspend fun actualizarEstadoTv(id: Int) {
