@@ -23,6 +23,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var contenedorTvs: LinearLayout
     private val numTvs = 6
 
+    // Memoria local para actualizar el reloj segundo a segundo en pantalla
+    private val segundosLocales = IntArray(numTvs + 1) { 0 }
+    private val estadoOnline = BooleanArray(numTvs + 1) { false }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -49,7 +53,8 @@ class MainActivity : AppCompatActivity() {
         setContentView(scroll)
 
         construirTarjetas()
-        iniciarSincronizacionAutomatica()
+        iniciarRelojVisual()
+        iniciarSincronizacionTv()
     }
 
     private fun cargarOCrearLlavesAdb(): AdbCrypto {
@@ -107,7 +112,7 @@ class MainActivity : AppCompatActivity() {
             val txtReloj = TextView(this).apply {
                 text = "00:00:00"
                 textSize = 34f
-                setTextColor(Color.parseColor("#22C55E"))
+                setTextColor(Color.parseColor("#94A3B8"))
                 gravity = Gravity.CENTER
                 setPadding(0, 12, 0, 16)
                 tag = "reloj_$i"
@@ -135,7 +140,7 @@ class MainActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                     setMargins(6, 0, 6, 0)
                 }
-                setOnClickListener { enviarComandoTv(i, "pkill -f SALA_TIMER; rm -f /data/local/tmp/.sala_fin") }
+                setOnClickListener { quitarTimerTv(i) }
             }
             val btnApagar = Button(this).apply {
                 text = "Apagar Ya"
@@ -144,9 +149,7 @@ class MainActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                     setMargins(6, 0, 6, 0)
                 }
-                setOnClickListener {
-                    enviarComandoTv(i, "pkill -f SALA_TIMER; rm -f /data/local/tmp/.sala_fin; input keyevent 223")
-                }
+                setOnClickListener { apagarTvAhora(i) }
             }
             filaAccion.addView(btnCancelar)
             filaAccion.addView(btnApagar)
@@ -177,8 +180,8 @@ class MainActivity : AppCompatActivity() {
         var conn: AdbConnection? = null
         try {
             socket = Socket()
-            socket.soTimeout = 3000
-            socket.connect(InetSocketAddress(ip, 5555), 3000)
+            socket.soTimeout = 3500
+            socket.connect(InetSocketAddress(ip, 5555), 3500)
             conn = AdbConnection.create(socket, crypto)
             conn.connect()
             val stream = conn.open("shell:$comando")
@@ -200,65 +203,95 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun enviarComandoTv(id: Int, cmd: String) {
+    private fun quitarTimerTv(id: Int) {
         lifecycleScope.launch {
-            ejecutarAdbShell(obtenerIp(id), cmd)
-            delay(300)
-            actualizarEstadoTv(id)
+            val ip = obtenerIp(id)
+            // Mata el PID exacto guardado y borra los archivos de control
+            val cmd = "kill -9 \$(cat /sdcard/Download/sala_pid.txt 2>/dev/null) 2>/dev/null; killall sleep 2>/dev/null; rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt"
+            val res = ejecutarAdbShell(ip, cmd)
+            if (res != null) {
+                segundosLocales[id] = 0
+                pintarTarjeta(id)
+                Toast.makeText(this@MainActivity, "Timer eliminado en TV $id", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this@MainActivity, "Sin conexión con TV $id", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun apagarTvAhora(id: Int) {
+        lifecycleScope.launch {
+            val ip = obtenerIp(id)
+            // Mata el timer y envía KEYCODE_POWER (26) que apaga cualquier Android TV
+            val cmd = "kill -9 \$(cat /sdcard/Download/sala_pid.txt 2>/dev/null) 2>/dev/null; killall sleep 2>/dev/null; rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; input keyevent 26"
+            val res = ejecutarAdbShell(ip, cmd)
+            if (res != null) {
+                segundosLocales[id] = 0
+                pintarTarjeta(id)
+                Toast.makeText(this@MainActivity, "Orden de apagado enviada a TV $id", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this@MainActivity, "Sin conexión con TV $id", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
     private fun sumarTiempoTv(id: Int, minutosExtra: Int) {
         lifecycleScope.launch {
             val ip = obtenerIp(id)
-            Toast.makeText(this@MainActivity, "Enviando +${minutosExtra}m al TV $id...", Toast.LENGTH_SHORT).show()
+            val actual = leerSegundosRestantes(ip)
+            if (actual == null) {
+                Toast.makeText(this@MainActivity, "TV $id sin conexión ADB", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
 
-            val actual = leerSegundosRestantes(ip) ?: 0
             val totalSeg = actual + (minutosExtra * 60)
             val avisoSeg = if (totalSeg > 120) totalSeg - 120 else 0
 
-            val cmd = if (avisoSeg > 0) {
-                "pkill -f SALA_TIMER; " +
-                "NOW=\$(date +%s); FIN=\$((NOW + $totalSeg)); echo \$FIN > /data/local/tmp/.sala_fin; " +
-                "(sleep $avisoSeg; cmd notification post -S bigtext -t 'Sala de Juegos' 'alerta_tv' 'Quedan 2 minutos de juego' >/dev/null 2>&1; sleep 120; rm -f /data/local/tmp/.sala_fin; input keyevent 223) >/dev/null 2>&1 & # SALA_TIMER"
+            // 1. Mata cualquier timer previo
+            // 2. Escribe la marca de tiempo de fin en /sdcard/Download/sala_fin.txt
+            // 3. Lanza el proceso en segundo plano y guarda su PID en sala_pid.txt
+            val scriptSegundoPlano = if (avisoSeg > 0) {
+                "sleep $avisoSeg; cmd notification post -S bigtext -t 'Sala de Juegos' 'alerta_tv' 'Quedan 2 minutos de tiempo' >/dev/null 2>&1; sleep 120; rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; input keyevent 26"
             } else {
-                "pkill -f SALA_TIMER; " +
-                "NOW=\$(date +%s); FIN=\$((NOW + $totalSeg)); echo \$FIN > /data/local/tmp/.sala_fin; " +
-                "(sleep $totalSeg; rm -f /data/local/tmp/.sala_fin; input keyevent 223) >/dev/null 2>&1 & # SALA_TIMER"
+                "sleep $totalSeg; rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; input keyevent 26"
             }
+
+            val cmd = "kill -9 \$(cat /sdcard/Download/sala_pid.txt 2>/dev/null) 2>/dev/null; " +
+                      "killall sleep 2>/dev/null; " +
+                      "FIN=\$((\$(date +%s) + $totalSeg)); echo \$FIN > /sdcard/Download/sala_fin.txt; " +
+                      "nohup sh -c \"$scriptSegundoPlano\" >/dev/null 2>&1 & echo \$! > /sdcard/Download/sala_pid.txt"
 
             val res = ejecutarAdbShell(ip, cmd)
             if (res != null) {
-                Toast.makeText(this@MainActivity, "Tiempo agregado al TV $id", Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(this@MainActivity, "Error: el TV $id no respondió", Toast.LENGTH_SHORT).show()
+                segundosLocales[id] = totalSeg
+                estadoOnline[id] = true
+                pintarTarjeta(id)
+                Toast.makeText(this@MainActivity, "+${minutosExtra}m agregados al TV $id", Toast.LENGTH_SHORT).show()
             }
-            delay(500)
-            actualizarEstadoTv(id)
         }
     }
 
     private suspend fun leerSegundosRestantes(ip: String): Int? {
-        val salida = ejecutarAdbShell(ip, "cat /data/local/tmp/.sala_fin 2>/dev/null; echo '---'; date +%s") ?: return null
-        val partes = salida.split("---")
+        val salida = ejecutarAdbShell(ip, "cat /sdcard/Download/sala_fin.txt 2>/dev/null; echo '|'; date +%s") ?: return null
+        val partes = salida.split("|")
         if (partes.size < 2) return 0
         val fin = partes[0].trim().toLongOrNull() ?: 0L
         val ahora = partes[1].trim().toLongOrNull() ?: 0L
         return if (fin > ahora) (fin - ahora).toInt() else 0
     }
 
-    private suspend fun actualizarEstadoTv(id: Int) {
+    private fun pintarTarjeta(id: Int) {
         val ip = obtenerIp(id)
-        val seg = leerSegundosRestantes(ip)
         val txtReloj = contenedorTvs.findViewWithTag<TextView>("reloj_$id") ?: return
         val txtTitulo = contenedorTvs.findViewWithTag<TextView>("titulo_$id") ?: return
 
-        if (seg == null) {
+        if (!estadoOnline[id]) {
             txtTitulo.text = "TV $id ($ip) - 🔴 Sin conexión"
             txtReloj.text = "--:--:--"
             txtReloj.setTextColor(Color.parseColor("#EF4444"))
         } else {
             txtTitulo.text = "TV $id ($ip) - 🟢 Conectado"
+            val seg = segundosLocales[id]
             val h = seg / 3600
             val m = (seg % 3600) / 60
             val s = seg % 60
@@ -273,11 +306,34 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun iniciarSincronizacionAutomatica() {
+    // Descuenta cada segundo en pantalla para que el reloj se vea fluido
+    private fun iniciarRelojVisual() {
+        lifecycleScope.launch {
+            while (isActive) {
+                delay(1000)
+                for (i in 1..numTvs) {
+                    if (estadoOnline[i] && segundosLocales[i] > 0) {
+                        segundosLocales[i] -= 1
+                        pintarTarjeta(i)
+                    }
+                }
+            }
+        }
+    }
+
+    // Sincroniza el tiempo real guardado dentro del TV cada 6 segundos
+    private fun iniciarSincronizacionTv() {
         lifecycleScope.launch {
             while (isActive) {
                 for (i in 1..numTvs) {
-                    actualizarEstadoTv(i)
+                    val seg = leerSegundosRestantes(obtenerIp(i))
+                    if (seg == null) {
+                        estadoOnline[i] = false
+                    } else {
+                        estadoOnline[i] = true
+                        segundosLocales[i] = seg
+                    }
+                    pintarTarjeta(i)
                     delay(400)
                 }
                 delay(5000)
