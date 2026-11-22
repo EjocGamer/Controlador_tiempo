@@ -63,7 +63,12 @@ class MainActivity : AppCompatActivity() {
         root.addView(contenedorTvs)
         scroll.addView(root)
         setContentView(scroll)
-
+        val svcIntent = android.content.Intent(this, VigilanteService::class.java)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            startForegroundService(svcIntent)
+        } else {
+            startService(svcIntent)
+        }
         construirTarjetas()
         iniciarRelojVisual()
         iniciarSincronizacionTv()
