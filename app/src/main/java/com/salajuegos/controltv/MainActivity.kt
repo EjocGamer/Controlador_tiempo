@@ -111,6 +111,22 @@ class MainActivity : AppCompatActivity() {
         return prefs.getString("ip_$id", "192.168.1.${100 + id}") ?: "192.168.1.${100 + id}"
     }
 
+    private fun estaBloqueada(id: Int): Boolean {
+        val prefs = getSharedPreferences("sala_tvs", Context.MODE_PRIVATE)
+        return prefs.getBoolean("bloqueada_$id", false)
+    }
+
+    private fun alternarBloqueo(id: Int) {
+        val nuevoEstado = !estaBloqueada(id)
+        getSharedPreferences("sala_tvs", Context.MODE_PRIVATE).edit()
+            .putBoolean("bloqueada_$id", nuevoEstado)
+            .apply()
+        construirTarjetas()
+        pintarTarjeta(id)
+        val msg = if (nuevoEstado) "🔒 ${obtenerNombre(id)} bloqueada (tiempos protegidos)" else "🔓 ${obtenerNombre(id)} desbloqueada"
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+    }
+
     private fun guardarConfig(id: Int, nombre: String, ip: String) {
         getSharedPreferences("sala_tvs", Context.MODE_PRIVATE).edit()
             .putString("nombre_$id", nombre.ifBlank { "Estación $id" })
@@ -118,12 +134,32 @@ class MainActivity : AppCompatActivity() {
             .apply()
     }
 
+    private fun crearBotonTiempoProtegido(id: Int, mins: Int, etiqueta: String, colorHex: String, bloqueada: Boolean): Button {
+        val colorActivo = if (bloqueada) "#1E293B" else colorHex
+        return crearBotonGrande(etiqueta, colorActivo, 15f, if (bloqueada) "#334155" else null).apply {
+            alpha = if (bloqueada) 0.45f else 1.0f
+            setOnClickListener {
+                if (estaBloqueada(id)) {
+                    Toast.makeText(this@MainActivity, "🔒 Estación bloqueada. Toca el candado para editar tiempo.", Toast.LENGTH_SHORT).show()
+                } else {
+                    sumarTiempoTv(id, mins)
+                }
+            }
+        }
+    }
+
     private fun construirTarjetas() {
         contenedorTvs.removeAllViews()
         for (i in 1..EstadoSala.NUM_TVS) {
+            val bloqueada = estaBloqueada(i)
+
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                background = crearFondoRedondeado("#162032", 18f, "#26354D")
+                background = crearFondoRedondeado(
+                    if (bloqueada) "#1C1926" else "#162032",
+                    18f,
+                    if (bloqueada) "#F59E0B" else "#26354D"
+                )
                 setPadding(dp(18), dp(18), dp(18), dp(18))
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
@@ -132,7 +168,7 @@ class MainActivity : AppCompatActivity() {
                 tag = "card_$i"
             }
 
-            // Cabecera: Estado + Nombre + IP + Editar
+            // Cabecera: Estado + Nombre + IP + Botón Candado + Botón Editar
             val header = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -157,13 +193,31 @@ class MainActivity : AppCompatActivity() {
             bloqueInfo.addView(txtNombre)
             bloqueInfo.addView(txtSubIp)
 
-            val btnConfig = crearBotonGrande("⚙️ Editar", "#334155", 13f).apply {
-                setPadding(dp(16), dp(10), dp(16), dp(10))
+            // Botón Candado
+            val btnCandado = crearBotonGrande(
+                if (bloqueada) "🔒" else "🔓",
+                if (bloqueada) "#B45309" else "#1E293B",
+                16f,
+                if (bloqueada) "#F59E0B" else "#475569"
+            ).apply {
+                setPadding(dp(14), dp(8), dp(14), dp(8))
+                minHeight = dp(42)
+                minimumHeight = dp(42)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { setMargins(0, 0, dp(8), 0) }
+                setOnClickListener { alternarBloqueo(i) }
+            }
+
+            val btnConfig = crearBotonGrande("⚙️", "#334155", 15f).apply {
+                setPadding(dp(14), dp(8), dp(14), dp(8))
                 minHeight = dp(42)
                 minimumHeight = dp(42)
                 setOnClickListener { mostrarDialogoConfig(i) }
             }
             header.addView(bloqueInfo)
+            header.addView(btnCandado)
             header.addView(btnConfig)
 
             // Reloj grande
@@ -177,21 +231,33 @@ class MainActivity : AppCompatActivity() {
                 tag = "reloj_$i"
             }
 
-            // Fila Principal (Siempre visible): +15m, +30m, +1h, +2h
-            val filaPrincipal = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            // Fila Principal 1 (Minutos): +15m, +30m, +45m
+            val filaMinutos = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             listOf(
                 Triple(15, "+15m", "#0284C7"),
                 Triple(30, "+30m", "#0284C7"),
+                Triple(45, "+45m", "#0369A1")
+            ).forEachIndexed { idx, (mins, etiqueta, color) ->
+                val btn = crearBotonTiempoProtegido(i, mins, etiqueta, color, bloqueada).apply {
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                        setMargins(if (idx == 0) 0 else dp(5), 0, if (idx == 2) 0 else dp(5), dp(10))
+                    }
+                }
+                filaMinutos.addView(btn)
+            }
+
+            // Fila Principal 2 (Horas): +1h, +2h
+            val filaHoras = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            listOf(
                 Triple(60, "+1h", "#2563EB"),
                 Triple(120, "+2h", "#4F46E5")
             ).forEachIndexed { idx, (mins, etiqueta, color) ->
-                val btn = crearBotonGrande(etiqueta, color, 15f).apply {
+                val btn = crearBotonTiempoProtegido(i, mins, etiqueta, color, bloqueada).apply {
                     layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                        setMargins(if (idx == 0) 0 else dp(4), 0, if (idx == 3) 0 else dp(4), dp(12))
+                        setMargins(if (idx == 0) 0 else dp(5), 0, if (idx == 1) 0 else dp(5), dp(12))
                     }
-                    setOnClickListener { sumarTiempoTv(i, mins) }
                 }
-                filaPrincipal.addView(btn)
+                filaHoras.addView(btn)
             }
 
             // Panel Desplegable con controles secundarios
@@ -204,22 +270,22 @@ class MainActivity : AppCompatActivity() {
 
             // Subfila Extra 1: +1m Prueba y +5m Cortesía
             val filaExtraTiempo = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            val btn1m = crearBotonGrande("+1m Prueba", "#D97706", 14f).apply {
+            val btn1m = crearBotonTiempoProtegido(i, 1, "+1m Prueba", "#D97706", bloqueada).apply {
+                textSize = 14f
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                     setMargins(0, 0, dp(5), dp(10))
                 }
-                setOnClickListener { sumarTiempoTv(i, 1) }
             }
-            val btn5m = crearBotonGrande("+5m Cortesía", "#0D9488", 14f).apply {
+            val btn5m = crearBotonTiempoProtegido(i, 5, "+5m Cortesía", "#0D9488", bloqueada).apply {
+                textSize = 14f
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                     setMargins(dp(5), 0, 0, dp(10))
                 }
-                setOnClickListener { sumarTiempoTv(i, 5) }
             }
             filaExtraTiempo.addView(btn1m)
             filaExtraTiempo.addView(btn5m)
 
-            // Subfila Extra 2: Volumen (Vol -, Mute, Vol +)
+            // Subfila Extra 2: Volumen (Siempre habilitado)
             val filaAudio = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             val btnVolDown = crearBotonGrande("🔉 Vol -", "#1E293B", 14f, "#334155").apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -243,7 +309,7 @@ class MainActivity : AppCompatActivity() {
             filaAudio.addView(btnMute)
             filaAudio.addView(btnVolUp)
 
-            // Subfila Extra 3: Encender, Quitar, Apagar
+            // Subfila Extra 3: Encender, Quitar (Protegido), Apagar
             val filaEnergia = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             val btnEncender = crearBotonGrande("⚡ Encender", "#16A34A", 13f).apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -251,11 +317,18 @@ class MainActivity : AppCompatActivity() {
                 }
                 setOnClickListener { encenderTv(i) }
             }
-            val btnCancelar = crearBotonGrande("⏹ Quitar", "#475569", 13f).apply {
+            val btnCancelar = crearBotonGrande("⏹ Quitar", if (bloqueada) "#1E293B" else "#475569", 13f).apply {
+                alpha = if (bloqueada) 0.45f else 1.0f
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                     setMargins(dp(5), 0, dp(5), 0)
                 }
-                setOnClickListener { quitarTimerTv(i) }
+                setOnClickListener {
+                    if (estaBloqueada(i)) {
+                        Toast.makeText(this@MainActivity, "🔒 Desbloquea la estación para quitar el timer.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        quitarTimerTv(i)
+                    }
+                }
             }
             val btnApagar = crearBotonGrande("🛑 Apagar", "#DC2626", 13f).apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -289,7 +362,8 @@ class MainActivity : AppCompatActivity() {
 
             card.addView(header)
             card.addView(txtReloj)
-            card.addView(filaPrincipal)
+            card.addView(filaMinutos)
+            card.addView(filaHoras)
             card.addView(panelExtra)
             card.addView(btnToggle)
             contenedorTvs.addView(card)
@@ -419,11 +493,12 @@ class MainActivity : AppCompatActivity() {
     private fun pintarTarjeta(id: Int) {
         val ip = obtenerIp(id)
         val nombre = obtenerNombre(id)
+        val bloqueada = estaBloqueada(id)
         val txtReloj = contenedorTvs.findViewWithTag<TextView>("reloj_$id") ?: return
         val txtTitulo = contenedorTvs.findViewWithTag<TextView>("titulo_$id") ?: return
         val txtSubIp = contenedorTvs.findViewWithTag<TextView>("subip_$id")
 
-        txtSubIp?.text = "IP: $ip"
+        txtSubIp?.text = if (bloqueada) "IP: $ip • 🔒 Tiempos bloqueados" else "IP: $ip"
 
         if (!EstadoSala.online[id]) {
             txtTitulo.text = "🔴 $nombre"
