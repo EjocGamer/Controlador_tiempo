@@ -54,11 +54,11 @@ object AdbManager {
             try {
                 socket = Socket()
                 socket.soTimeout = 1500
-                socket.connect(InetSocketAddress(ip, 5555), 1500)
+                socket.connect(InetSocketAddress(ip, 5555), 1200)
                 conn = AdbConnection.create(socket, obtenerCrypto(context))
                 conn.connect()
 
-                // Conectado exitosamente: limpiar cualquier pausa pendiente
+                // Conectado: elimina cualquier espera pendiente
                 pausaReconexionHasta.remove(ip)
 
                 val stream = conn.open("shell:$comando")
@@ -73,8 +73,8 @@ object AdbManager {
                 }
                 salida.toString()
             } catch (_: Exception) {
-                // Si el TV está apagado o esperando autorización RSA en pantalla, pausar 25s
-                pausaReconexionHasta[ip] = System.currentTimeMillis() + 25_000L
+                // Espera breve de 4s para evitar colisiones sin generar retrasos visuales
+                pausaReconexionHasta[ip] = System.currentTimeMillis() + 4_000L
                 null
             } finally {
                 try { conn?.close() } catch (_: Exception) {}
