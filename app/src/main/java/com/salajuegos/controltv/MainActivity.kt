@@ -29,7 +29,7 @@ class MainActivity : AppCompatActivity() {
         val scroll = ScrollView(this).apply { setBackgroundColor(Color.parseColor("#090D16")) }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(24), dp(16), dp(32))
+            setPadding(dp(14), dp(22), dp(14), dp(32))
         }
 
         val titulo = TextView(this).apply {
@@ -45,7 +45,7 @@ class MainActivity : AppCompatActivity() {
             textSize = 14f
             setTextColor(Color.parseColor("#94A3B8"))
             gravity = Gravity.CENTER
-            setPadding(0, 0, 0, dp(20))
+            setPadding(0, 0, 0, dp(18))
         }
         root.addView(titulo)
         root.addView(subtitulo)
@@ -101,10 +101,12 @@ class MainActivity : AppCompatActivity() {
             isAllCaps = false
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.WHITE)
-            background = crearFondoRedondeado(colorHex, 12f, bordeHex)
-            setPadding(dp(6), dp(14), dp(6), dp(14))
-            minHeight = dp(48)
-            minimumHeight = dp(48)
+            background = crearFondoRedondeado(colorHex, 10f, bordeHex)
+            setPadding(dp(2), dp(12), dp(2), dp(12))
+            minHeight = dp(46)
+            minimumHeight = dp(46)
+            minWidth = 0
+            minimumWidth = 0
         }
     }
 
@@ -123,6 +125,23 @@ class MainActivity : AppCompatActivity() {
         return prefs.getBoolean("bloqueada_$id", false)
     }
 
+    private fun obtenerMinutosAcumulados(id: Int): Int {
+        val prefs = getSharedPreferences("sala_tvs", Context.MODE_PRIVATE)
+        return prefs.getInt("mins_acumulados_$id", 0)
+    }
+
+    private fun sumarMinutosAcumulados(id: Int, mins: Int) {
+        val prefs = getSharedPreferences("sala_tvs", Context.MODE_PRIVATE)
+        val actual = prefs.getInt("mins_acumulados_$id", 0)
+        prefs.edit().putInt("mins_acumulados_$id", actual + mins).apply()
+    }
+
+    private fun limpiarMinutosAcumulados(id: Int) {
+        getSharedPreferences("sala_tvs", Context.MODE_PRIVATE).edit()
+            .putInt("mins_acumulados_$id", 0)
+            .apply()
+    }
+
     private fun alternarBloqueo(id: Int) {
         val nuevoEstado = !estaBloqueada(id)
         getSharedPreferences("sala_tvs", Context.MODE_PRIVATE).edit()
@@ -130,7 +149,7 @@ class MainActivity : AppCompatActivity() {
             .apply()
         construirTarjetas()
         pintarTarjeta(id)
-        val msg = if (nuevoEstado) "🔒 ${obtenerNombre(id)} bloqueada (tiempos protegidos)" else "🔓 ${obtenerNombre(id)} desbloqueada"
+        val msg = if (nuevoEstado) "🔒 ${obtenerNombre(id)} bloqueada" else "🔓 ${obtenerNombre(id)} desbloqueada"
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
     }
 
@@ -143,7 +162,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun crearBotonTiempoProtegido(id: Int, mins: Int, etiqueta: String, colorHex: String, bloqueada: Boolean): Button {
         val colorActivo = if (bloqueada) "#1E293B" else colorHex
-        return crearBotonGrande(etiqueta, colorActivo, 15f, if (bloqueada) "#334155" else null).apply {
+        return crearBotonGrande(etiqueta, colorActivo, 13.5f, if (bloqueada) "#334155" else null).apply {
             alpha = if (bloqueada) 0.45f else 1.0f
             setOnClickListener {
                 if (estaBloqueada(id)) {
@@ -167,11 +186,11 @@ class MainActivity : AppCompatActivity() {
                     18f,
                     if (bloqueada) "#F59E0B" else "#26354D"
                 )
-                setPadding(dp(18), dp(18), dp(18), dp(18))
+                setPadding(dp(14), dp(16), dp(14), dp(16))
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { setMargins(0, 0, 0, dp(22)) }
+                ).apply { setMargins(0, 0, 0, dp(20)) }
                 tag = "card_$i"
             }
 
@@ -193,14 +212,13 @@ class MainActivity : AppCompatActivity() {
             }
             val txtSubIp = TextView(this).apply {
                 text = "IP: ${obtenerIp(i)}"
-                textSize = 13f
+                textSize = 12.5f
                 setTextColor(Color.parseColor("#94A3B8"))
                 tag = "subip_$i"
             }
             bloqueInfo.addView(txtNombre)
             bloqueInfo.addView(txtSubIp)
 
-            // Botón Candado
             val btnCandado = crearBotonGrande(
                 if (bloqueada) "🔒" else "🔓",
                 if (bloqueada) "#B45309" else "#1E293B",
@@ -230,85 +248,32 @@ class MainActivity : AppCompatActivity() {
             // Reloj grande
             val txtReloj = TextView(this).apply {
                 text = "--:--:--"
-                textSize = 42f
+                textSize = 40f
                 setTypeface(null, Typeface.BOLD)
                 setTextColor(Color.parseColor("#94A3B8"))
                 gravity = Gravity.CENTER
-                setPadding(0, dp(14), 0, dp(16))
+                setPadding(0, dp(12), 0, dp(14))
                 tag = "reloj_$i"
             }
 
-            // Fila Principal 1 (Minutos): +15m, +30m, +45m
-            val filaMinutos = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            // ÚNICA FILA PRINCIPAL DE TIEMPOS: +15m, +30m, +45m, +1h, +2h
+            val filaTiempos = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             listOf(
                 Triple(15, "+15m", "#0284C7"),
                 Triple(30, "+30m", "#0284C7"),
-                Triple(45, "+45m", "#0369A1")
-            ).forEachIndexed { idx, (mins, etiqueta, color) ->
-                val btn = crearBotonTiempoProtegido(i, mins, etiqueta, color, bloqueada).apply {
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                        setMargins(if (idx == 0) 0 else dp(5), 0, if (idx == 2) 0 else dp(5), dp(10))
-                    }
-                }
-                filaMinutos.addView(btn)
-            }
-
-            // Fila Principal 2 (Horas): +1h, +2h
-            val filaHoras = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            listOf(
+                Triple(45, "+45m", "#0369A1"),
                 Triple(60, "+1h", "#2563EB"),
                 Triple(120, "+2h", "#4F46E5")
             ).forEachIndexed { idx, (mins, etiqueta, color) ->
                 val btn = crearBotonTiempoProtegido(i, mins, etiqueta, color, bloqueada).apply {
                     layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                        setMargins(if (idx == 0) 0 else dp(5), 0, if (idx == 1) 0 else dp(5), dp(10))
+                        setMargins(if (idx == 0) 0 else dp(3), 0, if (idx == 4) 0 else dp(3), dp(12))
                     }
                 }
-                filaHoras.addView(btn)
+                filaTiempos.addView(btn)
             }
 
-            // Fila Principal 3 (Tiempo Libre): Iniciar Libre / Cerrar y Redondear 30m
-            val filaLibre = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            val btnIniciarLibre = crearBotonGrande(
-                "⏱️ Tiempo Libre",
-                if (bloqueada) "#1E293B" else "#0E7490",
-                14f,
-                if (bloqueada) "#334155" else null
-            ).apply {
-                alpha = if (bloqueada) 0.45f else 1.0f
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    setMargins(0, 0, dp(5), dp(12))
-                }
-                setOnClickListener {
-                    if (estaBloqueada(i)) {
-                        Toast.makeText(this@MainActivity, "🔒 Estación bloqueada. Toca el candado para iniciar Tiempo Libre.", Toast.LENGTH_SHORT).show()
-                    } else {
-                        iniciarTiempoLibre(i)
-                    }
-                }
-            }
-            val btnCerrarLibre = crearBotonGrande(
-                "💰 Cerrar Libre",
-                if (bloqueada) "#1E293B" else "#059669",
-                14f,
-                if (bloqueada) "#334155" else null
-            ).apply {
-                alpha = if (bloqueada) 0.45f else 1.0f
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    setMargins(dp(5), 0, 0, dp(12))
-                }
-                setOnClickListener {
-                    if (estaBloqueada(i)) {
-                        Toast.makeText(this@MainActivity, "🔒 Desbloquea la estación para cerrar Tiempo Libre.", Toast.LENGTH_SHORT).show()
-                    } else {
-                        cerrarYCobrarTiempoLibre(i)
-                    }
-                }
-            }
-            filaLibre.addView(btnIniciarLibre)
-            filaLibre.addView(btnCerrarLibre)
-
-            // Panel Desplegable con controles secundarios
+            // Panel Desplegable con Tiempo Libre, Cerrar Tiempo, +1m Prueba, Audio y Energía
             val panelExtra = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 visibility = if (tarjetaExpandida[i]) View.VISIBLE else View.GONE
@@ -316,40 +281,71 @@ class MainActivity : AppCompatActivity() {
                 tag = "extra_$i"
             }
 
-            // Subfila Extra 1: +1m Prueba y +5m Cortesía
-            val filaExtraTiempo = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            // Subfila Extra 1 (Oculta): Tiempo Libre, Cerrar Tiempo (Toda la sesión), +1m Prueba
+            val filaSesionExtra = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            val btnIniciarLibre = crearBotonGrande(
+                "⏱️ Libre",
+                if (bloqueada) "#1E293B" else "#0E7490",
+                13f,
+                if (bloqueada) "#334155" else null
+            ).apply {
+                alpha = if (bloqueada) 0.45f else 1.0f
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    setMargins(0, 0, dp(4), dp(10))
+                }
+                setOnClickListener {
+                    if (estaBloqueada(i)) {
+                        Toast.makeText(this@MainActivity, "🔒 Estación bloqueada.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        iniciarTiempoLibre(i)
+                    }
+                }
+            }
+            val btnCerrarTiempo = crearBotonGrande(
+                "💰 Cerrar Tiempo",
+                if (bloqueada) "#1E293B" else "#059669",
+                13f,
+                if (bloqueada) "#334155" else null
+            ).apply {
+                alpha = if (bloqueada) 0.45f else 1.0f
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.3f).apply {
+                    setMargins(dp(4), 0, dp(4), dp(10))
+                }
+                setOnClickListener {
+                    if (estaBloqueada(i)) {
+                        Toast.makeText(this@MainActivity, "🔒 Desbloquea la estación para cerrar tiempo.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        cerrarSesionCompleta(i)
+                    }
+                }
+            }
             val btn1m = crearBotonTiempoProtegido(i, 1, "+1m Prueba", "#D97706", bloqueada).apply {
-                textSize = 14f
+                textSize = 13f
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    setMargins(0, 0, dp(5), dp(10))
+                    setMargins(dp(4), 0, 0, dp(10))
                 }
             }
-            val btn5m = crearBotonTiempoProtegido(i, 5, "+5m Cortesía", "#0D9488", bloqueada).apply {
-                textSize = 14f
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    setMargins(dp(5), 0, 0, dp(10))
-                }
-            }
-            filaExtraTiempo.addView(btn1m)
-            filaExtraTiempo.addView(btn5m)
+            filaSesionExtra.addView(btnIniciarLibre)
+            filaSesionExtra.addView(btnCerrarTiempo)
+            filaSesionExtra.addView(btn1m)
 
             // Subfila Extra 2: Volumen (Siempre habilitado)
             val filaAudio = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            val btnVolDown = crearBotonGrande("🔉 Vol -", "#1E293B", 14f, "#334155").apply {
+            val btnVolDown = crearBotonGrande("🔉 Vol -", "#1E293B", 13.5f, "#334155").apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    setMargins(0, 0, dp(5), dp(10))
+                    setMargins(0, 0, dp(4), dp(10))
                 }
                 setOnClickListener { enviarTeclaRapida(i, 25) }
             }
-            val btnMute = crearBotonGrande("🔇 Mute", "#1E293B", 14f, "#334155").apply {
+            val btnMute = crearBotonGrande("🔇 Mute", "#1E293B", 13.5f, "#334155").apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    setMargins(dp(5), 0, dp(5), dp(10))
+                    setMargins(dp(4), 0, dp(4), dp(10))
                 }
                 setOnClickListener { enviarTeclaRapida(i, 164) }
             }
-            val btnVolUp = crearBotonGrande("🔊 Vol +", "#1E293B", 14f, "#334155").apply {
+            val btnVolUp = crearBotonGrande("🔊 Vol +", "#1E293B", 13.5f, "#334155").apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    setMargins(dp(5), 0, 0, dp(10))
+                    setMargins(dp(4), 0, 0, dp(10))
                 }
                 setOnClickListener { enviarTeclaRapida(i, 24) }
             }
@@ -361,14 +357,14 @@ class MainActivity : AppCompatActivity() {
             val filaEnergia = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             val btnEncender = crearBotonGrande("⚡ Encender", "#16A34A", 13f).apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    setMargins(0, 0, dp(5), 0)
+                    setMargins(0, 0, dp(4), 0)
                 }
                 setOnClickListener { encenderTv(i) }
             }
             val btnCancelar = crearBotonGrande("⏹ Quitar", if (bloqueada) "#1E293B" else "#475569", 13f).apply {
                 alpha = if (bloqueada) 0.45f else 1.0f
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    setMargins(dp(5), 0, dp(5), 0)
+                    setMargins(dp(4), 0, dp(4), 0)
                 }
                 setOnClickListener {
                     if (estaBloqueada(i)) {
@@ -380,7 +376,7 @@ class MainActivity : AppCompatActivity() {
             }
             val btnApagar = crearBotonGrande("🛑 Apagar", "#DC2626", 13f).apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    setMargins(dp(5), 0, 0, 0)
+                    setMargins(dp(4), 0, 0, 0)
                 }
                 setOnClickListener { apagarTvAhora(i) }
             }
@@ -388,14 +384,14 @@ class MainActivity : AppCompatActivity() {
             filaEnergia.addView(btnCancelar)
             filaEnergia.addView(btnApagar)
 
-            panelExtra.addView(filaExtraTiempo)
+            panelExtra.addView(filaSesionExtra)
             panelExtra.addView(filaAudio)
             panelExtra.addView(filaEnergia)
 
             val btnToggle = crearBotonGrande(
-                if (tarjetaExpandida[i]) "▲ Ocultar controles" else "▼ Más controles (Audio / Apagar / +1m)",
+                if (tarjetaExpandida[i]) "▲ Ocultar controles" else "▼ Más controles (Libre / Cerrar / Audio / Apagar)",
                 "#1E293B",
-                13f,
+                12.5f,
                 "#334155"
             ).apply {
                 setTextColor(Color.parseColor("#CBD5E1"))
@@ -404,15 +400,13 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener {
                     tarjetaExpandida[i] = !tarjetaExpandida[i]
                     panelExtra.visibility = if (tarjetaExpandida[i]) View.VISIBLE else View.GONE
-                    text = if (tarjetaExpandida[i]) "▲ Ocultar controles" else "▼ Más controles (Audio / Apagar / +1m)"
+                    text = if (tarjetaExpandida[i]) "▲ Ocultar controles" else "▼ Más controles (Libre / Cerrar / Audio / Apagar)"
                 }
             }
 
             card.addView(header)
             card.addView(txtReloj)
-            card.addView(filaMinutos)
-            card.addView(filaHoras)
-            card.addView(filaLibre)
+            card.addView(filaTiempos)
             card.addView(panelExtra)
             card.addView(btnToggle)
             contenedorTvs.addView(card)
@@ -533,6 +527,7 @@ class MainActivity : AppCompatActivity() {
                 EstadoSala.online[id] = true
                 EstadoSala.esLibre[id] = false
                 EstadoSala.segundos[id] = 0
+                limpiarMinutosAcumulados(id)
                 pintarTarjeta(id)
                 Toast.makeText(this@MainActivity, "Reloj reiniciado en ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
             } else {
@@ -550,6 +545,7 @@ class MainActivity : AppCompatActivity() {
                 EstadoSala.online[id] = true
                 EstadoSala.esLibre[id] = false
                 EstadoSala.segundos[id] = 0
+                limpiarMinutosAcumulados(id)
                 pintarTarjeta(id)
                 Toast.makeText(this@MainActivity, "Apagando ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
             } else {
@@ -577,7 +573,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun cerrarYCobrarTiempoLibre(id: Int) {
+    private fun cerrarSesionCompleta(id: Int) {
         lifecycleScope.launch {
             val ip = obtenerIp(id)
             val salida = AdbManager.ejecutar(
@@ -592,49 +588,77 @@ class MainActivity : AppCompatActivity() {
             }
 
             val partes = salida.split("|")
-            val inicio = partes.getOrNull(0)?.trim()?.toLongOrNull() ?: 0L
+            val inicioLibre = partes.getOrNull(0)?.trim()?.toLongOrNull() ?: 0L
             val ahora = partes.getOrNull(1)?.trim()?.toLongOrNull() ?: 0L
+            val minsPrevios = obtenerMinutosAcumulados(id)
 
-            if (inicio < 1700000000L || ahora < inicio) {
-                Toast.makeText(this@MainActivity, "${obtenerNombre(id)} no está en Tiempo Libre", Toast.LENGTH_SHORT).show()
+            // Caso 1: Estaba en Tiempo Libre (puede tener además tiempo previo comprado)
+            if (inicioLibre > 1700000000L && ahora >= inicioLibre) {
+                val segLibre = (ahora - inicioLibre).toInt()
+                val minRealesLibre = ceil(segLibre / 60.0).toInt().coerceAtLeast(1)
+                val bloques30 = ceil(segLibre / 1800.0).toInt().coerceAtLeast(1)
+                val minCobroLibre = bloques30 * 30
+                val totalFinalMins = minsPrevios + minCobroLibre
+
+                val detallePrevio = if (minsPrevios > 0) "Tiempo previo comprado: $minsPrevios min\n" else ""
+
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("💰 Cerrar Tiempo • ${obtenerNombre(id)}")
+                    .setMessage(
+                        "${detallePrevio}" +
+                        "Tiempo Libre jugado: $minRealesLibre min (redondeado a $minCobroLibre min)\n\n" +
+                        "👉 TOTAL SESIÓN A COBRAR: ${formatearMinutos(totalFinalMins)}\n\n" +
+                        "¿Confirmar cierre de sesión?"
+                    )
+                    .setPositiveButton("Confirmar y Cerrar") { _, _ ->
+                        lifecycleScope.launch {
+                            AdbManager.ejecutar(this@MainActivity, ip, "rm -f /sdcard/Download/sala_libre.txt /sdcard/Download/sala_fin.txt", esAccionManual = true)
+                            EstadoSala.esLibre[id] = false
+                            EstadoSala.segundos[id] = 0
+                            limpiarMinutosAcumulados(id)
+                            pintarTarjeta(id)
+                            Toast.makeText(this@MainActivity, "Sesión cerrada (${formatearMinutos(totalFinalMins)})", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                    .setNegativeButton("Cancelar", null)
+                    .show()
                 return@launch
             }
 
-            val segJugados = (ahora - inicio).toInt()
-            val minReales = ceil(segJugados / 60.0).toInt().coerceAtLeast(1)
-            val bloques30 = ceil(segJugados / 1800.0).toInt().coerceAtLeast(1)
-            val minACobrar = bloques30 * 30
-
-            val hReal = segJugados / 3600
-            val mReal = (segJugados % 3600) / 60
-            val sReal = segJugados % 60
-            val textoReal = String.format("%02d:%02d:%02d", hReal, mReal, sReal)
-
-            val textoCobro = if (minACobrar % 60 == 0) {
-                "${minACobrar / 60} Hora(s)"
-            } else {
-                "${minACobrar / 60}h ${minACobrar % 60}min"
-            }
-
-            AlertDialog.Builder(this@MainActivity)
-                .setTitle("💰 Cerrar Tiempo Libre • ${obtenerNombre(id)}")
-                .setMessage(
-                    "Tiempo real jugado: $textoReal ($minReales min)\n\n" +
-                    "Tiempo redondeado a cobrar (bloques 30m):\n" +
-                    "👉 $textoCobro ($minACobrar minutos)\n\n" +
-                    "¿Confirmar cierre?"
-                )
-                .setPositiveButton("Confirmar y Cerrar") { _, _ ->
-                    lifecycleScope.launch {
-                        AdbManager.ejecutar(this@MainActivity, ip, "rm -f /sdcard/Download/sala_libre.txt", esAccionManual = true)
-                        EstadoSala.esLibre[id] = false
-                        EstadoSala.segundos[id] = 0
-                        pintarTarjeta(id)
-                        Toast.makeText(this@MainActivity, "Sesión cerrada ($textoCobro)", Toast.LENGTH_LONG).show()
+            // Caso 2: Sesión con temporizador normal (acumulado de todas las veces que pidió tiempo)
+            if (minsPrevios > 0) {
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("💰 Cerrar Tiempo • ${obtenerNombre(id)}")
+                    .setMessage(
+                        "Total acumulado comprado en esta sesión:\n" +
+                        "👉 ${formatearMinutos(minsPrevios)} ($minsPrevios minutos)\n\n" +
+                        "¿Confirmar cierre y reiniciar contador de sesión?"
+                    )
+                    .setPositiveButton("Confirmar y Cerrar") { _, _ ->
+                        lifecycleScope.launch {
+                            AdbManager.ejecutar(this@MainActivity, ip, "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_libre.txt", esAccionManual = true)
+                            EstadoSala.esLibre[id] = false
+                            EstadoSala.segundos[id] = 0
+                            limpiarMinutosAcumulados(id)
+                            pintarTarjeta(id)
+                            Toast.makeText(this@MainActivity, "Sesión cerrada (${formatearMinutos(minsPrevios)})", Toast.LENGTH_LONG).show()
+                        }
                     }
-                }
-                .setNegativeButton("Seguir jugando", null)
-                .show()
+                    .setNegativeButton("Cancelar", null)
+                    .show()
+            } else {
+                Toast.makeText(this@MainActivity, "${obtenerNombre(id)} no tiene tiempo acumulado activo", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun formatearMinutos(totalMins: Int): String {
+        val h = totalMins / 60
+        val m = totalMins % 60
+        return when {
+            h == 0 -> "$m min"
+            m == 0 -> "$h Hora(s)"
+            else -> "${h}h ${m}min"
         }
     }
 
@@ -663,11 +687,16 @@ class MainActivity : AppCompatActivity() {
             val cmd = "rm -f /sdcard/Download/sala_libre.txt; FIN=\$((\$(date +%s) + $totalSeg)); echo \$FIN > /sdcard/Download/sala_fin.txt"
             val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
             if (res != null) {
+                // Suma al historial acumulado de esta sesión (aunque se pulse varias veces o tras aviso)
+                if (minutosExtra > 1) {
+                    sumarMinutosAcumulados(id, minutosExtra)
+                }
                 EstadoSala.online[id] = true
                 EstadoSala.esLibre[id] = false
                 EstadoSala.segundos[id] = totalSeg
                 pintarTarjeta(id)
-                Toast.makeText(this@MainActivity, "+${minutosExtra}m en ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
+                val acum = obtenerMinutosAcumulados(id)
+                Toast.makeText(this@MainActivity, "+${minutosExtra}m (Acumulado sesión: ${acum}m)", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -676,6 +705,7 @@ class MainActivity : AppCompatActivity() {
         val ip = obtenerIp(id)
         val nombre = obtenerNombre(id)
         val bloqueada = estaBloqueada(id)
+        val acum = obtenerMinutosAcumulados(id)
         val txtReloj = contenedorTvs.findViewWithTag<TextView>("reloj_$id") ?: return
         val txtTitulo = contenedorTvs.findViewWithTag<TextView>("titulo_$id") ?: return
         val txtSubIp = contenedorTvs.findViewWithTag<TextView>("subip_$id")
@@ -698,11 +728,12 @@ class MainActivity : AppCompatActivity() {
             val bloques = ceil(seg.coerceAtLeast(1) / 1800.0).toInt().coerceAtLeast(1)
             val minCobro = bloques * 30
             txtTitulo.text = "⏱️ $nombre (LIBRE)"
-            txtSubIp?.text = if (bloqueada) "🔒 Cobro redondeado: $minCobro min" else "IP: $ip • Cobro redondeado: $minCobro min"
+            txtSubIp?.text = if (bloqueada) "🔒 Libre: $minCobro min" else "Libre actual: $minCobro min • Previo: ${acum}m"
             txtReloj.setTextColor(Color.parseColor("#38BDF8"))
         } else {
             txtTitulo.text = "🟢 $nombre"
-            txtSubIp?.text = if (bloqueada) "IP: $ip • 🔒 Tiempos bloqueados" else "IP: $ip"
+            val infoAcum = if (acum > 0) " • Sesión: ${acum}m" else ""
+            txtSubIp?.text = if (bloqueada) "IP: $ip • 🔒 Bloqueada$infoAcum" else "IP: $ip$infoAcum"
             txtReloj.setTextColor(
                 when {
                     seg == 0 -> Color.parseColor("#94A3B8")
