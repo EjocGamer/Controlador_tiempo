@@ -24,14 +24,21 @@ object EstadoSala {
         val prefs = context.getSharedPreferences("sala_tvs", Context.MODE_PRIVATE)
         val raw = prefs.getString("lista_ids", null)
         if (raw == null) {
-            // Si ya existían configuraciones previas en la app, las conserva; si es nueva, arranca con [1]
-            val existentes = (1..6).filter { id ->
-                prefs.contains("nombre_$id") \vert{}\vert{} prefs.contains("ip_$id")
+            val existentes = mutableListOf<Int>()
+            for (id in 1..6) {
+                val tieneNombre = prefs.contains("nombre_$id")
+                val tieneIp = prefs.contains("ip_$id")
+                if (tieneNombre) {
+                    existentes.add(id)
+                } else if (tieneIp) {
+                    existentes.add(id)
+                }
             }
             val iniciales = if (existentes.isNotEmpty()) existentes else listOf(1)
             guardarIdsEstaciones(context, iniciales)
             return iniciales
         }
+        if (raw.isBlank()) return emptyList()
         return raw.split(",").mapNotNull { it.trim().toIntOrNull() }
     }
 
@@ -132,7 +139,7 @@ class VigilanteService : Service() {
 
         val alerta = NotificationCompat.Builder(this, "ejoc_avisos_normal_v3")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("⏳ $nombreEstacion: quedan$tiempoTexto")
+            .setContentTitle("⏳ $nombreEstacion: quedan $tiempoTexto")
             .setContentText("Faltan menos de 2 minutos para el apagado automático.")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setSound(sonidoNotif)
@@ -149,10 +156,14 @@ class VigilanteService : Service() {
             while (isActive) {
                 val prefs = getSharedPreferences("sala_tvs", Context.MODE_PRIVATE)
                 val ids = EstadoSala.obtenerIdsEstaciones(this@VigilanteService)
+                val idsSet = ids.toSet()
 
-                // Limpia estados de estaciones eliminadas
-                estadoTextoNotif.keys.retainAll(ids.toSet())
-                avisoEnviado.keys.retainAll(ids.toSet())
+                estadoTextoNotif.keys.toList().forEach { k ->
+                    if (!idsSet.contains(k)) estadoTextoNotif.remove(k)
+                }
+                avisoEnviado.keys.toList().forEach { k ->
+                    if (!idsSet.contains(k)) avisoEnviado.remove(k)
+                }
 
                 val tareas = ids.map { id ->
                     async {
@@ -163,7 +174,10 @@ class VigilanteService : Service() {
                 }
                 tareas.awaitAll()
 
-                val lineas = ids.mapNotNull { id -> estadoTextoNotif[id]?.takeIf { it.isNotEmpty() } }
+                val lineas = ids.mapNotNull { id ->
+                    val txt = estadoTextoNotif[id]
+                    if (!txt.isNullOrEmpty()) txt else null
+                }
                 val textoFinal = if (lineas.isEmpty()) {
                     "Ninguna estación con tiempo activo"
                 } else {
@@ -199,7 +213,6 @@ class VigilanteService : Service() {
         val textoFin = partes[0].trim()
         val textoLibre = partes[1].trim()
 
-        // 1. Modo Tiempo Libre
         if (textoLibre.isNotEmpty()) {
             val inicioLibre = textoLibre.toLongOrNull() ?: 0L
             if (inicioLibre > 1700000000L && ahora >= inicioLibre) {
@@ -212,7 +225,7 @@ class VigilanteService : Service() {
                     val m = (transcurrido % 3600) / 60
                     val s = transcurrido % 60
                     val reloj = if (h > 0) String.format("%dh %02dm %02ds", h, m, s) else String.format("%02dm %02ds", m, s)
-                    estadoTextoNotif[id] = "⏱️ $nombre (Libre):$reloj"
+                    estadoTextoNotif[id] = "⏱️ $nombre (Libre): $reloj"
                     return
                 }
             }
@@ -220,7 +233,6 @@ class VigilanteService : Service() {
 
         EstadoSala.esLibre[id] = false
 
-        // 2. Modo Temporizador normal
         if (textoFin.isEmpty()) {
             avisoEnviado[id] = false
             EstadoSala.segundos[id] = 0
@@ -239,7 +251,7 @@ class VigilanteService : Service() {
             val s = restante % 60
             val reloj = if (h > 0) String.format("%dh %02dm %02ds", h, m, s) else String.format("%02dm %02ds", m, s)
             val icono = if (restante <= 120) "⚠️" else "🟢"
-            estadoTextoNotif[id] = "$icono $nombre:$reloj"
+            estadoTextoNotif[id] = "$icono $nombre: $reloj"
         } else {
             EstadoSala.segundos[id] = 0
             estadoTextoNotif[id] = ""
