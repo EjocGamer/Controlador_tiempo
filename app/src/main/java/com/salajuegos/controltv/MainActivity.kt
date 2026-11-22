@@ -18,13 +18,12 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.*
 import java.text.NumberFormat
 import java.util.Locale
-import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.ceil
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var contenedorTvs: LinearLayout
-    private val tarjetaExpandida = ConcurrentHashMap<Int, Boolean>()
+    private val tarjetasExpandidas = HashSet<Int>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -188,7 +187,7 @@ class MainActivity : AppCompatActivity() {
         EstadoSala.online.remove(id)
         EstadoSala.segundos.remove(id)
         EstadoSala.esLibre.remove(id)
-        tarjetaExpandida.remove(id)
+        tarjetasExpandidas.remove(id)
 
         construirTarjetas()
         Toast.makeText(this, "Estación eliminada", Toast.LENGTH_SHORT).show()
@@ -296,7 +295,7 @@ class MainActivity : AppCompatActivity() {
         for (i in ids) {
             val bloqueada = estaBloqueada(i)
             val estaOnline = EstadoSala.online[i] == true
-            val expandida = tarjetaExpandida[i] == true
+            val expandida = tarjetasExpandidas.contains(i)
 
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -313,7 +312,6 @@ class MainActivity : AppCompatActivity() {
                 tag = "card_$i"
             }
 
-            // Cabecera
             val header = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -364,7 +362,6 @@ class MainActivity : AppCompatActivity() {
             header.addView(btnCandado)
             header.addView(btnConfig)
 
-            // Reloj grande
             val txtReloj = TextView(this).apply {
                 text = "--:--:--"
                 textSize = 40f
@@ -375,7 +372,6 @@ class MainActivity : AppCompatActivity() {
                 tag = "reloj_$i"
             }
 
-            // Fila principal de tiempos: +15m, +30m, +45m, +1h, +2h
             val filaTiempos = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             listOf(
                 Triple(15, "+15m", "#0284C7"),
@@ -392,7 +388,6 @@ class MainActivity : AppCompatActivity() {
                 filaTiempos.addView(btn)
             }
 
-            // Panel Desplegable
             val panelExtra = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 visibility = if (expandida) View.VISIBLE else View.GONE
@@ -447,7 +442,6 @@ class MainActivity : AppCompatActivity() {
             filaSesionExtra.addView(btnCerrarTiempo)
             filaSesionExtra.addView(btn1m)
 
-            // Audio
             val filaAudio = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             val btnVolDown = crearBotonGrande("🔉 Vol -", "#1E293B", 13.5f, "#334155").apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -471,7 +465,6 @@ class MainActivity : AppCompatActivity() {
             filaAudio.addView(btnMute)
             filaAudio.addView(btnVolUp)
 
-            // Energía
             val filaEnergia = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             val btnEncender = crearBotonGrande("⚡ Encender", "#16A34A", 13f).apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -516,10 +509,15 @@ class MainActivity : AppCompatActivity() {
                 minHeight = dp(42)
                 minimumHeight = dp(42)
                 setOnClickListener {
-                    val nuevo = !(tarjetaExpandida[i] == true)
-                    tarjetaExpandida[i] = nuevo
-                    panelExtra.visibility = if (nuevo) View.VISIBLE else View.GONE
-                    text = if (nuevo) "▲ Ocultar controles" else "▼ Más controles (Libre / Cerrar / Audio / Apagar)"
+                    val ahoraExpandida = if (tarjetasExpandidas.contains(i)) {
+                        tarjetasExpandidas.remove(i)
+                        false
+                    } else {
+                        tarjetasExpandidas.add(i)
+                        true
+                    }
+                    panelExtra.visibility = if (ahoraExpandida) View.VISIBLE else View.GONE
+                    text = if (ahoraExpandida) "▲ Ocultar controles" else "▼ Más controles (Libre / Cerrar / Audio / Apagar)"
                 }
             }
 
@@ -736,17 +734,36 @@ class MainActivity : AppCompatActivity() {
     private fun quitarTimerTv(id: Int) {
         lifecycleScope.launch {
             val ip = obtenerIp(id)
-            val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt /sdcard/Download/sala_libre.txt"
-            val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
-            if (res != null) {
-                EstadoSala.online[id] = true
-                EstadoSala.esLibre[id] = false
-                EstadoSala.segundos[id] = 0
-                limpiarMinutosAcumulados(id)
-                pintarTarjeta(id)
-                Toast.makeText(this@MainActivity, "Reloj reiniciado en ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
+            val estabaEnLibre = EstadoSala.esLibre[id] == true
+            if (estabaEnLibre) {
+                // Si ya estaba en Tiempo Libre, sí reinicia el reloj libre a 0 manteniendo el acumulado previo
+                val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt /sdcard/Download/sala_libre.txt"
+                val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
+                if (res != null) {
+                    EstadoSala.online[id] = true
+                    EstadoSala.esLibre[id] = false
+                    EstadoSala.segundos[id] = 0
+                    pintarTarjeta(id)
+                    Toast.makeText(this@MainActivity, "Tiempo Libre detenido en ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this@MainActivity, "Sin conexión con ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
+                }
             } else {
-                Toast.makeText(this@MainActivity, "Sin conexión con ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
+                // Quita el temporizador para que NO se apague el TV, conserva el cobro acumulado
+                // y arranca Tiempo Libre automáticamente para contabilizar los minutos de gracia
+                val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; date +%s > /sdcard/Download/sala_libre.txt"
+                val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
+                if (res != null) {
+                    EstadoSala.online[id] = true
+                    EstadoSala.esLibre[id] = true
+                    EstadoSala.segundos[id] = 0
+                    pintarTarjeta(id)
+                    val acum = obtenerMinutosAcumulados(id)
+                    val msgAcum = if (acum > 0) " (Mantiene ${formatearEnHoras(acum)})" else ""
+                    Toast.makeText(this@MainActivity, "⏱️ Timer quitado → Pasó a Tiempo Libre$msgAcum", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this@MainActivity, "Sin conexión con ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
@@ -873,7 +890,7 @@ class MainActivity : AppCompatActivity() {
             val salida = AdbManager.ejecutar(
                 this@MainActivity,
                 ip,
-                "cat /sdcard/Download/sala_fin.txt 2>/dev/null; echo '|'; date +%s",
+                "cat /sdcard/Download/sala_fin.txt 2>/dev/null; echo '|'; cat /sdcard/Download/sala_libre.txt 2>/dev/null; echo '|'; date +%s",
                 esAccionManual = true
             )
             if (salida == null) {
@@ -884,11 +901,22 @@ class MainActivity : AppCompatActivity() {
             }
 
             val partes = salida.split("|")
-            val ahora = partes.getOrNull(1)?.trim()?.toLongOrNull() ?: 0L
             val finActual = partes.getOrNull(0)?.trim()?.toLongOrNull() ?: 0L
+            val inicioLibre = partes.getOrNull(1)?.trim()?.toLongOrNull() ?: 0L
+            val ahora = partes.getOrNull(2)?.trim()?.toLongOrNull() ?: 0L
+
             val baseSegundos = if (ahora > 1700000000L && finActual > ahora) (finActual - ahora).toInt() else 0
 
-            val totalSeg = baseSegundos + (minutosExtra * 60)
+            // Si venía corriendo en Tiempo Libre, se descuenta ese tiempo ya jugado del nuevo bloque solicitado
+            val segYaJugadosEnLibre = if (ahora > 1700000000L && inicioLibre > 1700000000L && ahora >= inicioLibre) {
+                (ahora - inicioLibre).toInt()
+            } else {
+                0
+            }
+
+            val segSolicitados = minutosExtra * 60
+            val totalSeg = (baseSegundos + segSolicitados - segYaJugadosEnLibre).coerceAtLeast(0)
+
             val cmd = "rm -f /sdcard/Download/sala_libre.txt; FIN=\$((\$(date +%s) + $totalSeg)); echo \$FIN > /sdcard/Download/sala_fin.txt"
             val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
             if (res != null) {
@@ -901,9 +929,14 @@ class MainActivity : AppCompatActivity() {
                 pintarTarjeta(id)
                 val acum = obtenerMinutosAcumulados(id)
                 val valorAcum = calcularValorSesion(id, acum)
+                val notaDescuento = if (segYaJugadosEnLibre >= 60) {
+                    " (-${segYaJugadosEnLibre / 60}m de libre descontados)"
+                } else {
+                    ""
+                }
                 Toast.makeText(
                     this@MainActivity,
-                    "+${minutosExtra}m • Total: ${formatearEnHoras(acum)} (${formatearMoneda(valorAcum)})",
+                    "+${minutosExtra}m$notaDescuento • Total: ${formatearEnHoras(acum)} (${formatearMoneda(valorAcum)})",
                     Toast.LENGTH_SHORT
                 ).show()
             }
