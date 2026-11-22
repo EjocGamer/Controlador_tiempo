@@ -18,6 +18,7 @@ object EstadoSala {
     const val NUM_TVS = 6
     val online = BooleanArray(NUM_TVS + 1) { false }
     val segundos = IntArray(NUM_TVS + 1) { 0 }
+    val esLibre = BooleanArray(NUM_TVS + 1) { false }
 }
 
 class VigilanteService : Service() {
@@ -61,7 +62,6 @@ class VigilanteService : Service() {
             ).apply { setShowBadge(false) }
             nm.createNotificationChannel(canalServicio)
 
-            // Notificación estándar (tono corto de notificación normal, no invasivo)
             val canalAlertas = NotificationChannel(
                 "ejoc_avisos_normal_v3",
                 "Avisos de Tiempo por Vencer",
@@ -153,7 +153,7 @@ class VigilanteService : Service() {
         val salida = AdbManager.ejecutar(
             this,
             ip,
-            "cat /sdcard/Download/sala_fin.txt 2>/dev/null; echo '|'; date +%s"
+            "cat /sdcard/Download/sala_fin.txt 2>/dev/null; echo '|'; cat /sdcard/Download/sala_libre.txt 2>/dev/null; echo '|'; date +%s"
         )
         if (salida == null) {
             EstadoSala.online[id] = false
@@ -162,14 +162,38 @@ class VigilanteService : Service() {
         }
 
         val partes = salida.split("|")
-        if (partes.size < 2) return
+        if (partes.size < 3) return
 
-        val ahora = partes[1].trim().toLongOrNull() ?: return
+        val ahora = partes[2].trim().toLongOrNull() ?: return
         if (ahora < 1700000000L) return
 
         EstadoSala.online[id] = true
 
         val textoFin = partes[0].trim()
+        val textoLibre = partes[1].trim()
+
+        // 1. Modo Tiempo Libre (cronómetro ascendente, no se apaga solo)
+        if (textoLibre.isNotEmpty()) {
+            val inicioLibre = textoLibre.toLongOrNull() ?: 0L
+            if (inicioLibre > 1700000000L && ahora >= inicioLibre) {
+                val transcurrido = (ahora - inicioLibre).toInt()
+                if (transcurrido <= 86400) {
+                    EstadoSala.esLibre[id] = true
+                    EstadoSala.segundos[id] = transcurrido
+                    avisoEnviado[id] = false
+                    val h = transcurrido / 3600
+                    val m = (transcurrido % 3600) / 60
+                    val s = transcurrido % 60
+                    val reloj = if (h > 0) String.format("%dh %02dm %02ds", h, m, s) else String.format("%02dm %02ds", m, s)
+                    estadoTextoNotif[id] = "⏱️ $nombre (Libre): $reloj"
+                    return
+                }
+            }
+        }
+
+        EstadoSala.esLibre[id] = false
+
+        // 2. Modo Temporizador normal
         if (textoFin.isEmpty()) {
             avisoEnviado[id] = false
             EstadoSala.segundos[id] = 0
