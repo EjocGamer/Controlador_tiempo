@@ -229,20 +229,27 @@ class MainActivity : AppCompatActivity() {
                 tag = "extra_$i"
             }
 
-            // Subfila Extra 1: +5m (Cortesía) y +2h
+       // Subfila Extra 1: +1m Prueba, +5m Cortesía, +2h
             val filaExtraTiempo = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            val btn5m = crearBotonGrande("+5m Cortesía", "#0D9488", 14f).apply {
+            val btn1m = crearBotonGrande("+1m Prueba", "#D97706", 13f).apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    setMargins(0, 0, dp(6), dp(10))
+                    setMargins(0, 0, dp(4), dp(10))
+                }
+                setOnClickListener { sumarTiempoTv(i, 1) }
+            }
+            val btn5m = crearBotonGrande("+5m Cortesía", "#0D9488", 13f).apply {
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    setMargins(dp(4), 0, dp(4), dp(10))
                 }
                 setOnClickListener { sumarTiempoTv(i, 5) }
             }
-            val btn2h = crearBotonGrande("+2 Horas", "#4F46E5", 14f).apply {
+            val btn2h = crearBotonGrande("+2 Horas", "#4F46E5", 13f).apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    setMargins(dp(6), 0, 0, dp(10))
+                    setMargins(dp(4), 0, 0, dp(10))
                 }
                 setOnClickListener { sumarTiempoTv(i, 120) }
             }
+            filaExtraTiempo.addView(btn1m)
             filaExtraTiempo.addView(btn5m)
             filaExtraTiempo.addView(btn2h)
 
