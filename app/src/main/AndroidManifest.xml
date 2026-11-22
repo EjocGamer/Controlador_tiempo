@@ -5,8 +5,10 @@
 
     <application
         android:allowBackup="true"
-        android:label="Control Sala TV"
-        android:theme="@style/Theme.MaterialComponents.DayNight.DarkActionBar">
+        android:icon="@drawable/ic_launcher_ejoc"
+        android:roundIcon="@drawable/ic_launcher_ejoc"
+        android:label="EjocGames Time"
+        android:theme="@style/Theme.MaterialComponents.DayNight.NoActionBar">
         <activity
             android:name=".MainActivity"
             android:exported="true">
