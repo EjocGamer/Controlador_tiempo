@@ -3,6 +3,7 @@ package com.salajuegos.controltv
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.text.InputType
 import android.text.method.DigitsKeyListener
@@ -34,26 +35,26 @@ class MainActivity : AppCompatActivity() {
 
         crypto = cargarOCrearLlavesAdb()
 
-        val scroll = ScrollView(this).apply { setBackgroundColor(Color.parseColor("#0B1120")) }
+        val scroll = ScrollView(this).apply { setBackgroundColor(Color.parseColor("#090D16")) }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(28, 36, 28, 36)
+            setPadding(24, 32, 24, 32)
         }
 
         val titulo = TextView(this).apply {
             text = "🎮 EjocGames Time"
-            textSize = 24f
+            textSize = 25f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor("#38BDF8"))
             gravity = Gravity.CENTER
-            setPadding(0, 0, 0, 6)
+            setPadding(0, 0, 0, 4)
         }
         val subtitulo = TextView(this).apply {
-            text = "Control de Pantallas y Tiempos"
+            text = "Control de Pantallas, Tiempos y Audio"
             textSize = 13f
             setTextColor(Color.parseColor("#94A3B8"))
             gravity = Gravity.CENTER
-            setPadding(0, 0, 0, 24)
+            setPadding(0, 0, 0, 20)
         }
         root.addView(titulo)
         root.addView(subtitulo)
@@ -66,6 +67,33 @@ class MainActivity : AppCompatActivity() {
         construirTarjetas()
         iniciarRelojVisual()
         iniciarSincronizacionTv()
+    }
+
+    // Crea fondos con bordes redondeados y contorno sutil
+    private fun crearFondoRedondeado(colorHex: String, radioDp: Float, bordeHex: String? = null): GradientDrawable {
+        val density = resources.displayMetrics.density
+        return GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = radioDp * density
+            setColor(Color.parseColor(colorHex))
+            if (bordeHex != null) {
+                setStroke((1.5f * density).toInt(), Color.parseColor(bordeHex))
+            }
+        }
+    }
+
+    private fun crearBotonEstilizado(texto: String, colorHex: String, textoSize: Float = 12f): Button {
+        return Button(this).apply {
+            text = texto
+            textSize = textoSize
+            isAllCaps = false
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            background = crearFondoRedondeado(colorHex, 10f)
+            setPadding(8, 12, 8, 12)
+            minHeight = 0
+            minimumHeight = 0
+        }
     }
 
     private fun cargarOCrearLlavesAdb(): AdbCrypto {
@@ -103,7 +131,7 @@ class MainActivity : AppCompatActivity() {
         for (i in 1..numTvs) {
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setBackgroundColor(Color.parseColor("#1E293B"))
+                background = crearFondoRedondeado("#162032", 16f, "#26354D")
                 setPadding(24, 20, 24, 20)
                 val params = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
@@ -113,79 +141,98 @@ class MainActivity : AppCompatActivity() {
                 tag = "card_$i"
             }
 
+            // Cabecera: Nombre + Botón Editar
             val header = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
             }
             val txtNombre = TextView(this).apply {
-                text = "${obtenerNombre(i)} (${obtenerIp(i)})"
+                text = "🔴 ${obtenerNombre(i)} (${obtenerIp(i)})"
                 textSize = 15f
                 setTypeface(null, Typeface.BOLD)
                 setTextColor(Color.WHITE)
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
                 tag = "titulo_$i"
             }
-            val btnConfig = Button(this).apply {
-                text = "⚙️ Editar"
-                textSize = 12f
+            val btnConfig = crearBotonEstilizado("⚙️ Editar", "#334155", 12f).apply {
+                setPadding(20, 10, 20, 10)
                 setOnClickListener { mostrarDialogoConfig(i) }
             }
             header.addView(txtNombre)
             header.addView(btnConfig)
 
+            // Reloj central
             val txtReloj = TextView(this).apply {
-                text = "00:00:00"
-                textSize = 34f
+                text = "--:--:--"
+                textSize = 36f
                 setTypeface(null, Typeface.BOLD)
                 setTextColor(Color.parseColor("#94A3B8"))
                 gravity = Gravity.CENTER
-                setPadding(0, 8, 0, 12)
+                setPadding(0, 10, 0, 14)
                 tag = "reloj_$i"
             }
 
-            // Fila 1: Botones de tiempo (+5m, +15m, +30m, +1h)
+            // Fila 1: Tiempos (+5m, +15m, +30m, +1h, +2h)
             val filaSumar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            listOf(5 to "+5m", 15 to "+15m", 30 to "+30m", 60 to "+1h").forEach { (mins, etiqueta) ->
-                val btn = Button(this).apply {
-                    text = etiqueta
-                    textSize = 13f
-                    setBackgroundColor(if (mins == 5) Color.parseColor("#0D9488") else Color.parseColor("#0284C7"))
-                    setTextColor(Color.WHITE)
+            val tiempos = listOf(
+                Triple(5, "+5m", "#0D9488"),
+                Triple(15, "+15m", "#0284C7"),
+                Triple(30, "+30m", "#0284C7"),
+                Triple(60, "+1h", "#2563EB"),
+                Triple(120, "+2h", "#4F46E5")
+            )
+            tiempos.forEach { (mins, etiqueta, color) ->
+                val btn = crearBotonEstilizado(etiqueta, color, 12f).apply {
                     layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                        setMargins(4, 0, 4, 8)
+                        setMargins(4, 0, 4, 10)
                     }
                     setOnClickListener { sumarTiempoTv(i, mins) }
                 }
                 filaSumar.addView(btn)
             }
 
-            // Fila 2: Encender, Quitar Timer, Apagar Ya
+            // Fila 2: Control de Volumen (Vol -, Mute, Vol +)
+            val filaAudio = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            val btnVolDown = crearBotonEstilizado("🔉 Vol -", "#1E293B", 12f).apply {
+                background = crearFondoRedondeado("#1E293B", 10f, "#334155")
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    setMargins(4, 0, 4, 10)
+                }
+                setOnClickListener { enviarTeclaRapida(i, 25, "Bajando volumen") }
+            }
+            val btnMute = crearBotonEstilizado("🔇 Mute", "#1E293B", 12f).apply {
+                background = crearFondoRedondeado("#1E293B", 10f, "#334155")
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    setMargins(4, 0, 4, 10)
+                }
+                setOnClickListener { enviarTeclaRapida(i, 164, "Silencio / Sonido") }
+            }
+            val btnVolUp = crearBotonEstilizado("🔊 Vol +", "#1E293B", 12f).apply {
+                background = crearFondoRedondeado("#1E293B", 10f, "#334155")
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    setMargins(4, 0, 4, 10)
+                }
+                setOnClickListener { enviarTeclaRapida(i, 24, "Subiendo volumen") }
+            }
+            filaAudio.addView(btnVolDown)
+            filaAudio.addView(btnMute)
+            filaAudio.addView(btnVolUp)
+
+            // Fila 3: Encender, Quitar Timer, Apagar Ya
             val filaAccion = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            val btnEncender = Button(this).apply {
-                text = "Encender"
-                textSize = 12f
-                setBackgroundColor(Color.parseColor("#16A34A"))
-                setTextColor(Color.WHITE)
+            val btnEncender = crearBotonEstilizado("⚡ Encender", "#16A34A", 12f).apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                     setMargins(4, 0, 4, 0)
                 }
                 setOnClickListener { encenderTv(i) }
             }
-            val btnCancelar = Button(this).apply {
-                text = "Quitar Timer"
-                textSize = 12f
-                setBackgroundColor(Color.parseColor("#475569"))
-                setTextColor(Color.WHITE)
+            val btnCancelar = crearBotonEstilizado("⏹ Quitar Timer", "#475569", 12f).apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                     setMargins(4, 0, 4, 0)
                 }
                 setOnClickListener { quitarTimerTv(i) }
             }
-            val btnApagar = Button(this).apply {
-                text = "Apagar Ya"
-                textSize = 12f
-                setBackgroundColor(Color.parseColor("#DC2626"))
-                setTextColor(Color.WHITE)
+            val btnApagar = crearBotonEstilizado("🛑 Apagar Ya", "#DC2626", 12f).apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                     setMargins(4, 0, 4, 0)
                 }
@@ -198,6 +245,7 @@ class MainActivity : AppCompatActivity() {
             card.addView(header)
             card.addView(txtReloj)
             card.addView(filaSumar)
+            card.addView(filaAudio)
             card.addView(filaAccion)
             contenedorTvs.addView(card)
         }
@@ -221,7 +269,6 @@ class MainActivity : AppCompatActivity() {
         }
         val inputIp = EditText(this).apply {
             setText(obtenerIp(id))
-            // Abre directamente el teclado numérico con punto incluido
             inputType = InputType.TYPE_CLASS_NUMBER
             keyListener = DigitsKeyListener.getInstance("0123456789.")
         }
@@ -248,7 +295,6 @@ class MainActivity : AppCompatActivity() {
         var conn: AdbConnection? = null
         try {
             socket = Socket()
-            // Timeout reducido a 1.5s para detección casi instantánea
             socket.soTimeout = 1500
             socket.connect(InetSocketAddress(ip, 5555), 1500)
             conn = AdbConnection.create(socket, crypto)
@@ -272,10 +318,18 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun enviarTeclaRapida(id: Int, keycode: Int, mensaje: String) {
+        lifecycleScope.launch {
+            val res = ejecutarAdbShell(obtenerIp(id), "input keyevent $keycode")
+            if (res == null) {
+                Toast.makeText(this@MainActivity, "${obtenerNombre(id)} sin conexión", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     private fun encenderTv(id: Int) {
         lifecycleScope.launch {
             val ip = obtenerIp(id)
-            // KEYCODE_WAKEUP (224) despierta el TV sin apagarlo si ya estaba encendido
             val res = ejecutarAdbShell(ip, "input keyevent 224")
             if (res != null) {
                 Toast.makeText(this@MainActivity, "Encendiendo ${obtenerNombre(id)}...", Toast.LENGTH_SHORT).show()
@@ -288,7 +342,7 @@ class MainActivity : AppCompatActivity() {
     private fun quitarTimerTv(id: Int) {
         lifecycleScope.launch {
             val ip = obtenerIp(id)
-            val cmd = "kill -9 \$(cat /sdcard/Download/sala_pid.txt 2>/dev/null) 2>/dev/null; killall sleep 2>/dev/null; rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt"
+            val cmd = "kill -9 \$(cat /sdcard/Download/sala_pid.txt 2>/dev/null) 2>/dev/null; rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt"
             val res = ejecutarAdbShell(ip, cmd)
             if (res != null) {
                 segundosLocales[id] = 0
@@ -303,7 +357,7 @@ class MainActivity : AppCompatActivity() {
     private fun apagarTvAhora(id: Int) {
         lifecycleScope.launch {
             val ip = obtenerIp(id)
-            val cmd = "kill -9 \$(cat /sdcard/Download/sala_pid.txt 2>/dev/null) 2>/dev/null; killall sleep 2>/dev/null; rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; input keyevent 26"
+            val cmd = "kill -9 \$(cat /sdcard/Download/sala_pid.txt 2>/dev/null) 2>/dev/null; rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; input keyevent 26"
             val res = ejecutarAdbShell(ip, cmd)
             if (res != null) {
                 segundosLocales[id] = 0
@@ -324,17 +378,22 @@ class MainActivity : AppCompatActivity() {
                 return@launch
             }
 
-            val totalSeg = actual + (minutosExtra * 60)
+            // Si actual == -1 (lectura incompleta), usamos segundosLocales[id]
+            val baseSegundos = if (actual >= 0) actual else segundosLocales[id]
+            val totalSeg = baseSegundos + (minutosExtra * 60)
 
-            // Script desacoplado con setsid que vigila el reloj real (date +%s) cada 5 segundos
-            // Así no depende de un sleep largo ni muere al cerrarse la sesión ADB
+            // Advertencia visual triple faltando 2 minutos (120s):
+            // 1. Notificación del sistema
+            // 2. Pulso doble de volumen (baja y sube 2 puntos) para que salte la barra en pantalla sobre cualquier HDMI
             val loopVigilancia = "AVISO=0; " +
                 "while [ -f /sdcard/Download/sala_fin.txt ]; do " +
                 "FIN=\$(cat /sdcard/Download/sala_fin.txt 2>/dev/null); " +
                 "NOW=\$(date +%s); " +
                 "REST=\$((FIN - NOW)); " +
                 "if [ \$REST -le 120 ] && [ \$REST -gt 0 ] && [ \$AVISO -eq 0 ]; then " +
-                "AVISO=1; cmd notification post -S bigtext -t 'EjocGames' 'alerta_tv' 'Quedan 2 minutos de juego' >/dev/null 2>&1; input keyevent 25; sleep 1; input keyevent 24; " +
+                "AVISO=1; " +
+                "cmd notification post -S bigtext -t 'EjocGames' 'alerta_tv' 'Quedan 2 minutos de juego' >/dev/null 2>&1; " +
+                "input keyevent 25; input keyevent 25; sleep 1; input keyevent 24; input keyevent 24; " +
                 "fi; " +
                 "if [ \$REST -le 0 ]; then " +
                 "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; " +
@@ -358,13 +417,25 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // Devuelve: null = TV desconectado, -1 = lectura incompleta (ignorar), >= 0 = segundos reales válidos
     private suspend fun leerSegundosRestantes(ip: String): Int? {
         val salida = ejecutarAdbShell(ip, "cat /sdcard/Download/sala_fin.txt 2>/dev/null; echo '|'; date +%s") ?: return null
         val partes = salida.split("|")
-        if (partes.size < 2) return 0
-        val fin = partes[0].trim().toLongOrNull() ?: 0L
-        val ahora = partes[1].trim().toLongOrNull() ?: 0L
-        return if (fin > ahora) (fin - ahora).toInt() else 0
+        if (partes.size < 2) return -1
+
+        val ahora = partes[1].trim().toLongOrNull() ?: return -1
+        // Validar que 'ahora' sea un timestamp Unix real (> año 2023) para evitar el bug de miles de horas
+        if (ahora < 1700000000L) return -1
+
+        val textoFin = partes[0].trim()
+        if (textoFin.isEmpty()) return 0
+
+        val fin = textoFin.toLongOrNull() ?: return -1
+        val diff = (fin - ahora).toInt()
+
+        // Descartar valores absurdos (> 24 horas = 86400s) producto de paquetes cortados
+        if (diff > 86400) return -1
+        return if (diff > 0) diff else 0
     }
 
     private fun pintarTarjeta(id: Int) {
@@ -400,7 +471,10 @@ class MainActivity : AppCompatActivity() {
             estadoOnline[id] = false
         } else {
             estadoOnline[id] = true
-            segundosLocales[id] = seg
+            // Solo sobreescribir el reloj si la lectura fue limpia (seg >= 0)
+            if (seg >= 0) {
+                segundosLocales[id] = seg
+            }
         }
         pintarTarjeta(id)
     }
@@ -419,7 +493,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Consulta todos los TVs en paralelo al mismo tiempo (~1.5s total)
     private fun iniciarSincronizacionTv() {
         lifecycleScope.launch {
             while (isActive) {
