@@ -1020,7 +1020,7 @@ class MainActivity : AppCompatActivity() {
             val ip = obtenerIp(id)
             val estabaEnLibre = EstadoSala.esLibre[id] == true
             if (estabaEnLibre) {
-                val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt /sdcard/Download/sala_libre.txt"
+                val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt /sdcard/Download/sala_libre.txt /data/local/tmp/sala_fin.txt /data/local/tmp/sala_libre.txt"
                 val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
                 if (res != null) {
                     EstadoSala.online[id] = true
@@ -1033,7 +1033,7 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this@MainActivity, "Sin conexión con ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
                 }
             } else {
-                val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; date +%s > /sdcard/Download/sala_libre.txt"
+                val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt /data/local/tmp/sala_fin.txt; T=\$(date +%s); echo \$T > /sdcard/Download/sala_libre.txt; echo \$T > /data/local/tmp/sala_libre.txt; chmod 644 /data/local/tmp/sala_libre.txt; am startservice -n com.salajuegos.ejocoverlay/.OverlayService 2>/dev/null"
                 val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
                 if (res != null) {
                     EstadoSala.online[id] = true
@@ -1054,7 +1054,7 @@ class MainActivity : AppCompatActivity() {
     private fun apagarTvAhora(id: Int) {
         lifecycleScope.launch {
             val ip = obtenerIp(id)
-            val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt /sdcard/Download/sala_libre.txt; input keyevent 26"
+            val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt /sdcard/Download/sala_libre.txt /data/local/tmp/sala_fin.txt /data/local/tmp/sala_libre.txt; input keyevent 26"
             val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
             if (res != null) {
                 EstadoSala.online[id] = true
@@ -1072,7 +1072,7 @@ class MainActivity : AppCompatActivity() {
     private fun iniciarTiempoLibre(id: Int) {
         lifecycleScope.launch {
             val ip = obtenerIp(id)
-            val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; date +%s > /sdcard/Download/sala_libre.txt"
+            val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt /data/local/tmp/sala_fin.txt; T=\$(date +%s); echo \$T > /sdcard/Download/sala_libre.txt; echo \$T > /data/local/tmp/sala_libre.txt; chmod 644 /data/local/tmp/sala_libre.txt; am startservice -n com.salajuegos.ejocoverlay/.OverlayService 2>/dev/null"
             val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
             if (res != null) {
                 EstadoSala.online[id] = true
@@ -1118,7 +1118,7 @@ class MainActivity : AppCompatActivity() {
                 val totalValor = calcularValorSesion(id, totalFinalMins)
 
                 if (totalFinalMins <= 0 && esGracia) {
-                    AdbManager.ejecutar(this@MainActivity, ip, "rm -f /sdcard/Download/sala_libre.txt /sdcard/Download/sala_fin.txt", esAccionManual = true)
+                    AdbManager.ejecutar(this@MainActivity, ip, "rm -f /sdcard/Download/sala_libre.txt /sdcard/Download/sala_fin.txt /data/local/tmp/sala_libre.txt /data/local/tmp/sala_fin.txt", esAccionManual = true)
                     EstadoSala.esLibre[id] = false
                     EstadoSala.segundos[id] = 0
                     limpiarMinutosAcumulados(id)
@@ -1144,7 +1144,7 @@ class MainActivity : AppCompatActivity() {
                     )
                     .setPositiveButton("Confirmar y Cerrar") { _, _ ->
                         lifecycleScope.launch {
-                            AdbManager.ejecutar(this@MainActivity, ip, "rm -f /sdcard/Download/sala_libre.txt /sdcard/Download/sala_fin.txt", esAccionManual = true)
+                            AdbManager.ejecutar(this@MainActivity, ip, "rm -f /sdcard/Download/sala_libre.txt /sdcard/Download/sala_fin.txt /data/local/tmp/sala_libre.txt /data/local/tmp/sala_fin.txt", esAccionManual = true)
                             HistorialManager.registrarCierre(this@MainActivity, id, nombreEstacion, totalFinalMins, totalValor)
                             EstadoSala.esLibre[id] = false
                             EstadoSala.segundos[id] = 0
@@ -1170,7 +1170,7 @@ class MainActivity : AppCompatActivity() {
                     )
                     .setPositiveButton("Confirmar y Cerrar") { _, _ ->
                         lifecycleScope.launch {
-                            AdbManager.ejecutar(this@MainActivity, ip, "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_libre.txt", esAccionManual = true)
+                            AdbManager.ejecutar(this@MainActivity, ip, "rm -f /sdcard/Download/sala_libre.txt /sdcard/Download/sala_fin.txt /data/local/tmp/sala_libre.txt /data/local/tmp/sala_fin.txt", esAccionManual = true)
                             HistorialManager.registrarCierre(this@MainActivity, id, nombreEstacion, minsPrevios, totalValor)
                             EstadoSala.esLibre[id] = false
                             EstadoSala.segundos[id] = 0
@@ -1219,7 +1219,7 @@ class MainActivity : AppCompatActivity() {
             val segSolicitados = minutosExtra * 60
             val totalSeg = (baseSegundos + segSolicitados - segYaJugadosEnLibre).coerceAtLeast(0)
 
-            val cmd = "rm -f /sdcard/Download/sala_libre.txt; FIN=\$((\$(date +%s) + $totalSeg)); echo \$FIN > /sdcard/Download/sala_fin.txt"
+            val cmd = "rm -f /sdcard/Download/sala_libre.txt /data/local/tmp/sala_libre.txt; FIN=\$((\$(date +%s) + $totalSeg)); echo \$FIN > /sdcard/Download/sala_fin.txt; echo \$FIN > /data/local/tmp/sala_fin.txt; chmod 644 /data/local/tmp/sala_fin.txt; am startservice -n com.salajuegos.ejocoverlay/.OverlayService 2>/dev/null"
             val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
             if (res != null) {
                 if (minutosExtra > 1) {
