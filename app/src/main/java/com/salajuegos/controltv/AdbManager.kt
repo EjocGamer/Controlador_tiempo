@@ -49,16 +49,18 @@ object AdbManager {
         }
         cerrarConexion(ip)
 
-        // Evita abrir múltiples solicitudes RSA seguidas mientras el TV muestra el cartel de autorización
         val ahora = System.currentTimeMillis()
         val pausadoHasta = pausaReconexionHasta[ip] ?: 0L
         if (!forzarAhora && ahora < pausadoHasta) {
             return null
         }
 
+        // Bloquea cualquier otro intento durante 30s mientras sale el único cuadro RSA en pantalla
+        pausaReconexionHasta[ip] = ahora + 30_000L
+
         return try {
             val socket = Socket()
-            socket.soTimeout = 4000
+            socket.soTimeout = 3000
             socket.keepAlive = true
             socket.connect(InetSocketAddress(ip, 5555), 2500)
             val conn = AdbConnection.create(socket, obtenerCrypto(context))
@@ -67,8 +69,6 @@ object AdbManager {
             pausaReconexionHasta.remove(ip)
             conn
         } catch (_: Exception) {
-            // Espera 25 segundos antes de volver a tocar este TV si está esperando confirmación en pantalla
-            pausaReconexionHasta[ip] = System.currentTimeMillis() + 25_000L
             null
         }
     }
@@ -76,26 +76,23 @@ object AdbManager {
     suspend fun ejecutar(context: Context, ip: String, comando: String, esAccionManual: Boolean = false): String? = withContext(Dispatchers.IO) {
         val mutex = candadosPorIp.getOrPut(ip) { Mutex() }
         mutex.withLock {
-            for (intento in 1..2) {
-                try {
-                    val conn = obtenerOConectar(context, ip, esAccionManual && intento == 1) ?: return@withContext null
-                    val stream = conn.open("shell:$comando")
-                    val salida = StringBuilder()
-                    while (!stream.isClosed) {
-                        try {
-                            val bytes = stream.read()
-                            if (bytes != null) salida.append(String(bytes))
-                        } catch (_: Exception) {
-                            break
-                        }
+            try {
+                val conn = obtenerOConectar(context, ip, esAccionManual) ?: return@withContext null
+                val stream = conn.open("shell:$comando")
+                val salida = StringBuilder()
+                while (!stream.isClosed) {
+                    try {
+                        val bytes = stream.read()
+                        if (bytes != null) salida.append(String(bytes))
+                    } catch (_: Exception) {
+                        break
                     }
-                    return@withContext salida.toString()
-                } catch (_: Exception) {
-                    cerrarConexion(ip)
-                    pausaReconexionHasta[ip] = System.currentTimeMillis() + 25_000L
                 }
+                salida.toString()
+            } catch (_: Exception) {
+                cerrarConexion(ip)
+                null
             }
-            null
         }
     }
 }
