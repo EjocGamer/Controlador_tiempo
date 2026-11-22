@@ -9,24 +9,16 @@ import android.os.Build
 import android.os.Bundle
 import android.text.InputType
 import android.text.method.DigitsKeyListener
-import android.util.Base64
 import android.view.Gravity
 import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import com.tananaev.adblib.AdbBase64
-import com.tananaev.adblib.AdbConnection
-import com.tananaev.adblib.AdbCrypto
 import kotlinx.coroutines.*
-import java.io.File
-import java.net.InetSocketAddress
-import java.net.Socket
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var crypto: AdbCrypto
     private lateinit var contenedorTvs: LinearLayout
     private val numTvs = 6
 
@@ -36,8 +28,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        crypto = cargarOCrearLlavesAdb()
 
         val scroll = ScrollView(this).apply { setBackgroundColor(Color.parseColor("#090D16")) }
         val root = LinearLayout(this).apply {
@@ -110,22 +100,9 @@ class MainActivity : AppCompatActivity() {
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.WHITE)
             background = crearFondoRedondeado(colorHex, 12f, bordeHex)
-            setPadding(dp(10), dp(14), dp(10), dp(14))
+            setPadding(dp(6), dp(14), dp(6), dp(14))
             minHeight = dp(48)
             minimumHeight = dp(48)
-        }
-    }
-
-    private fun cargarOCrearLlavesAdb(): AdbCrypto {
-        val base64 = AdbBase64 { data -> Base64.encodeToString(data, Base64.NO_WRAP) }
-        val pubFile = File(filesDir, "adb_pub.key")
-        val privFile = File(filesDir, "adb_priv.key")
-        return if (pubFile.exists() && privFile.exists()) {
-            AdbCrypto.loadAdbKeyPair(base64, privFile, pubFile)
-        } else {
-            val nueva = AdbCrypto.generateAdbKeyPair(base64)
-            nueva.saveAdbKeyPair(privFile, pubFile)
-            nueva
         }
     }
 
@@ -160,7 +137,7 @@ class MainActivity : AppCompatActivity() {
                 tag = "card_$i"
             }
 
-            // Cabecera amplia: Estado + Nombre + IP + Botón Editar
+            // Cabecera: Estado + Nombre + IP + Editar
             val header = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -176,14 +153,14 @@ class MainActivity : AppCompatActivity() {
                 setTextColor(Color.WHITE)
                 tag = "titulo_$i"
             }
-            val txtIpSub = TextView(this).apply {
+            val txtSubIp = TextView(this).apply {
                 text = "IP: ${obtenerIp(i)}"
                 textSize = 13f
                 setTextColor(Color.parseColor("#94A3B8"))
                 tag = "subip_$i"
             }
             bloqueInfo.addView(txtNombre)
-            bloqueInfo.addView(txtIpSub)
+            bloqueInfo.addView(txtSubIp)
 
             val btnConfig = crearBotonGrande("⚙️ Editar", "#334155", 13f).apply {
                 setPadding(dp(16), dp(10), dp(16), dp(10))
@@ -194,7 +171,7 @@ class MainActivity : AppCompatActivity() {
             header.addView(bloqueInfo)
             header.addView(btnConfig)
 
-            // Reloj grande y legible
+            // Reloj grande
             val txtReloj = TextView(this).apply {
                 text = "--:--:--"
                 textSize = 42f
@@ -205,23 +182,24 @@ class MainActivity : AppCompatActivity() {
                 tag = "reloj_$i"
             }
 
-            // Fila Principal (Siempre visible): 3 botones grandes (+15m, +30m, +1h)
+            // Fila Principal (Siempre visible): +15m, +30m, +1h, +2h
             val filaPrincipal = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             listOf(
                 Triple(15, "+15m", "#0284C7"),
                 Triple(30, "+30m", "#0284C7"),
-                Triple(60, "+1h", "#2563EB")
+                Triple(60, "+1h", "#2563EB"),
+                Triple(120, "+2h", "#4F46E5")
             ).forEachIndexed { idx, (mins, etiqueta, color) ->
-                val btn = crearBotonGrande(etiqueta, color, 16f).apply {
+                val btn = crearBotonGrande(etiqueta, color, 15f).apply {
                     layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                        setMargins(if (idx == 0) 0 else dp(6), 0, if (idx == 2) 0 else dp(6), dp(12))
+                        setMargins(if (idx == 0) 0 else dp(4), 0, if (idx == 3) 0 else dp(4), dp(12))
                     }
                     setOnClickListener { sumarTiempoTv(i, mins) }
                 }
                 filaPrincipal.addView(btn)
             }
 
-            // Contenedor Desplegable con controles secundarios grandes
+            // Panel Desplegable con controles secundarios
             val panelExtra = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 visibility = if (tarjetaExpandida[i]) View.VISIBLE else View.GONE
@@ -229,31 +207,24 @@ class MainActivity : AppCompatActivity() {
                 tag = "extra_$i"
             }
 
-       // Subfila Extra 1: +1m Prueba, +5m Cortesía, +2h
+            // Subfila Extra 1: +1m Prueba y +5m Cortesía
             val filaExtraTiempo = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            val btn1m = crearBotonGrande("+1m Prueba", "#D97706", 13f).apply {
+            val btn1m = crearBotonGrande("+1m Prueba", "#D97706", 14f).apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    setMargins(0, 0, dp(4), dp(10))
+                    setMargins(0, 0, dp(5), dp(10))
                 }
                 setOnClickListener { sumarTiempoTv(i, 1) }
             }
-            val btn5m = crearBotonGrande("+5m Cortesía", "#0D9488", 13f).apply {
+            val btn5m = crearBotonGrande("+5m Cortesía", "#0D9488", 14f).apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    setMargins(dp(4), 0, dp(4), dp(10))
+                    setMargins(dp(5), 0, 0, dp(10))
                 }
                 setOnClickListener { sumarTiempoTv(i, 5) }
             }
-            val btn2h = crearBotonGrande("+2 Horas", "#4F46E5", 13f).apply {
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    setMargins(dp(4), 0, 0, dp(10))
-                }
-                setOnClickListener { sumarTiempoTv(i, 120) }
-            }
             filaExtraTiempo.addView(btn1m)
             filaExtraTiempo.addView(btn5m)
-            filaExtraTiempo.addView(btn2h)
 
-            // Subfila Extra 2: Volumen grande (Vol -, Mute, Vol +)
+            // Subfila Extra 2: Volumen (Vol -, Mute, Vol +)
             val filaAudio = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             val btnVolDown = crearBotonGrande("🔉 Vol -", "#1E293B", 14f, "#334155").apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -277,7 +248,7 @@ class MainActivity : AppCompatActivity() {
             filaAudio.addView(btnMute)
             filaAudio.addView(btnVolUp)
 
-            // Subfila Extra 3: Encender, Quitar Timer, Apagar Ya (botones grandes y claros)
+            // Subfila Extra 3: Encender, Quitar, Apagar
             val filaEnergia = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             val btnEncender = crearBotonGrande("⚡ Encender", "#16A34A", 13f).apply {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -305,9 +276,8 @@ class MainActivity : AppCompatActivity() {
             panelExtra.addView(filaAudio)
             panelExtra.addView(filaEnergia)
 
-            // Botón acordeón para desplegar/ocultar controles extra
             val btnToggle = crearBotonGrande(
-                if (tarjetaExpandida[i]) "▲ Ocultar controles" else "▼ Más controles (Audio / Apagar / +5m)",
+                if (tarjetaExpandida[i]) "▲ Ocultar controles" else "▼ Más controles (Audio / Apagar / +1m)",
                 "#1E293B",
                 13f,
                 "#334155"
@@ -318,7 +288,7 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener {
                     tarjetaExpandida[i] = !tarjetaExpandida[i]
                     panelExtra.visibility = if (tarjetaExpandida[i]) View.VISIBLE else View.GONE
-                    text = if (tarjetaExpandida[i]) "▲ Ocultar controles" else "▼ Más controles (Audio / Apagar / +5m)"
+                    text = if (tarjetaExpandida[i]) "▲ Ocultar controles" else "▼ Más controles (Audio / Apagar / +1m)"
                 }
             }
 
@@ -370,37 +340,9 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private suspend fun ejecutarAdbShell(ip: String, comando: String): String? = withContext(Dispatchers.IO) {
-        var socket: Socket? = null
-        var conn: AdbConnection? = null
-        try {
-            socket = Socket()
-            socket.soTimeout = 1500
-            socket.connect(InetSocketAddress(ip, 5555), 1500)
-            conn = AdbConnection.create(socket, crypto)
-            conn.connect()
-            val stream = conn.open("shell:$comando")
-            val salida = StringBuilder()
-            while (!stream.isClosed) {
-                try {
-                    val bytes = stream.read()
-                    if (bytes != null) salida.append(String(bytes))
-                } catch (_: Exception) {
-                    break
-                }
-            }
-            salida.toString()
-        } catch (e: Exception) {
-            null
-        } finally {
-            try { conn?.close() } catch (_: Exception) {}
-            try { socket?.close() } catch (_: Exception) {}
-        }
-    }
-
     private fun enviarTeclaRapida(id: Int, keycode: Int) {
         lifecycleScope.launch {
-            val res = ejecutarAdbShell(obtenerIp(id), "input keyevent $keycode")
+            val res = AdbManager.ejecutar(this@MainActivity, obtenerIp(id), "input keyevent $keycode", esAccionManual = true)
             if (res == null) {
                 Toast.makeText(this@MainActivity, "${obtenerNombre(id)} sin conexión", Toast.LENGTH_SHORT).show()
             }
@@ -410,7 +352,7 @@ class MainActivity : AppCompatActivity() {
     private fun encenderTv(id: Int) {
         lifecycleScope.launch {
             val ip = obtenerIp(id)
-            val res = ejecutarAdbShell(ip, "input keyevent 224")
+            val res = AdbManager.ejecutar(this@MainActivity, ip, "input keyevent 224", esAccionManual = true)
             if (res != null) {
                 Toast.makeText(this@MainActivity, "Encendiendo ${obtenerNombre(id)}...", Toast.LENGTH_SHORT).show()
             } else {
@@ -422,8 +364,8 @@ class MainActivity : AppCompatActivity() {
     private fun quitarTimerTv(id: Int) {
         lifecycleScope.launch {
             val ip = obtenerIp(id)
-            val cmd = "kill -9 \$(cat /sdcard/Download/sala_pid.txt 2>/dev/null) 2>/dev/null; rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt"
-            val res = ejecutarAdbShell(ip, cmd)
+            val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt"
+            val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
             if (res != null) {
                 segundosLocales[id] = 0
                 pintarTarjeta(id)
@@ -437,8 +379,8 @@ class MainActivity : AppCompatActivity() {
     private fun apagarTvAhora(id: Int) {
         lifecycleScope.launch {
             val ip = obtenerIp(id)
-            val cmd = "kill -9 \$(cat /sdcard/Download/sala_pid.txt 2>/dev/null) 2>/dev/null; rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; input keyevent 26"
-            val res = ejecutarAdbShell(ip, cmd)
+            AdbManager.ejecutar(this@MainActivity, ip, "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt", esAccionManual = true)
+            val res = AdbManager.ejecutar(this@MainActivity, ip, "input keyevent 26", esAccionManual = true)
             if (res != null) {
                 segundosLocales[id] = 0
                 pintarTarjeta(id)
@@ -452,7 +394,7 @@ class MainActivity : AppCompatActivity() {
     private fun sumarTiempoTv(id: Int, minutosExtra: Int) {
         lifecycleScope.launch {
             val ip = obtenerIp(id)
-            val actual = leerSegundosRestantes(ip)
+            val actual = leerSegundosRestantes(ip, esAccionManual = true)
             if (actual == null) {
                 Toast.makeText(this@MainActivity, "${obtenerNombre(id)} sin conexión", Toast.LENGTH_SHORT).show()
                 return@launch
@@ -462,7 +404,7 @@ class MainActivity : AppCompatActivity() {
             val totalSeg = baseSegundos + (minutosExtra * 60)
 
             val cmd = "FIN=\$((\$(date +%s) + $totalSeg)); echo \$FIN > /sdcard/Download/sala_fin.txt"
-            val res = ejecutarAdbShell(ip, cmd)
+            val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
             if (res != null) {
                 segundosLocales[id] = totalSeg
                 estadoOnline[id] = true
@@ -472,8 +414,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private suspend fun leerSegundosRestantes(ip: String): Int? {
-        val salida = ejecutarAdbShell(ip, "cat /sdcard/Download/sala_fin.txt 2>/dev/null; echo '|'; date +%s") ?: return null
+    private suspend fun leerSegundosRestantes(ip: String, esAccionManual: Boolean = false): Int? {
+        val salida = AdbManager.ejecutar(ip = ip, context = this, comando = "cat /sdcard/Download/sala_fin.txt 2>/dev/null; echo '|'; date +%s", esAccionManual = esAccionManual) ?: return null
         val partes = salida.split("|")
         if (partes.size < 2) return -1
 
@@ -554,7 +496,7 @@ class MainActivity : AppCompatActivity() {
                     async { actualizarUnTv(id) }
                 }
                 tareas.awaitAll()
-                delay(4000)
+                delay(5000)
             }
         }
     }
