@@ -173,19 +173,24 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private suspend fun ejecutarAdbShell(ip: String, comando: String): String? = withContext(Dispatchers.IO) {
+private suspend fun ejecutarAdbShell(ip: String, comando: String): String? = withContext(Dispatchers.IO) {
         var socket: Socket? = null
         var conn: AdbConnection? = null
         try {
             socket = Socket()
-            socket.connect(InetSocketAddress(ip, 5555), 2500)
+            socket.soTimeout = 3000 // Evita que la lectura se quede colgada
+            socket.connect(InetSocketAddress(ip, 5555), 3000)
             conn = AdbConnection.create(socket, crypto)
             conn.connect()
             val stream = conn.open("shell:$comando")
             val salida = StringBuilder()
             while (!stream.isClosed) {
-                val bytes = stream.read()
-                if (bytes != null) salida.append(String(bytes))
+                try {
+                    val bytes = stream.read()
+                    if (bytes != null) salida.append(String(bytes))
+                } catch (_: Exception) {
+                    break
+                }
             }
             salida.toString()
         } catch (e: Exception) {
@@ -273,13 +278,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun iniciarSincronizacionAutomatica() {
+  private fun iniciarSincronizacionAutomatica() {
         lifecycleScope.launch {
             while (isActive) {
                 for (i in 1..numTvs) {
-                    launch { actualizarEstadoTv(i) }
+                    actualizarEstadoTv(i)
+                    delay(400)
                 }
-                delay(3000)
+                delay(5000)
             }
         }
     }
