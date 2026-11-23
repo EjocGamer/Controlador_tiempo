@@ -48,7 +48,7 @@ class MainActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         val titulo = TextView(this).apply {
-            text = "🎮 EjocGames Time"
+            text = "🎮 EjocGames Timer"
             textSize = 23f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor("#38BDF8"))
