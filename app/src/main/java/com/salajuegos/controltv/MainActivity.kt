@@ -519,7 +519,7 @@ class MainActivity : AppCompatActivity() {
                     if (estaBloqueada(i)) {
                         Toast.makeText(this@MainActivity, "🔒 Desbloquea la estación para quitar el tiempo.", Toast.LENGTH_SHORT).show()
                     } else {
-                        (i)
+                        quitarTimerTv(i)
                     }
                 }
             }
