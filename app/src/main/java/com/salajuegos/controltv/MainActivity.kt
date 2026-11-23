@@ -48,7 +48,7 @@ class MainActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         val titulo = TextView(this).apply {
-            text = "🎮 EjocGames Timer"
+            text = "🎮 EjocGame's Timer"
             textSize = 23f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor("#38BDF8"))
@@ -805,7 +805,7 @@ class MainActivity : AppCompatActivity() {
         renderizarReporte(periodoActual)
 
         AlertDialog.Builder(this)
-            .setTitle("📊 Caja y Estadísticas • EjocGames")
+            .setTitle("📊 Caja y Estadísticas • EjocGame's")
             .setView(contenedorPrincipal)
             .setPositiveButton("Cerrar", null)
             .show()
@@ -819,7 +819,7 @@ class MainActivity : AppCompatActivity() {
         registros: List<RegistroSesion>
     ) {
         val sb = StringBuilder()
-        sb.append("🎮 *EjocGames Time - $tituloPeriodo*\n")
+        sb.append("🎮 *EjocGame's Timer - $tituloPeriodo*\n")
         sb.append("💵 Total: *${formatearMoneda(totalDinero)}*\n")
         sb.append("⏱️ Horas: *${formatearEnHoras(totalMinutos)}* (${registros.size} sesiones)\n\n")
         sb.append("🏆 *Ranking por uso:*\n")
