@@ -10,9 +10,10 @@
     <application
         android:allowBackup="true"
         android:icon="@drawable/ic_launcher_ejoc"
+        android:label="EjocGames Timer"
         android:roundIcon="@drawable/ic_launcher_ejoc"
-        android:label="EjocGames Time"
-        android:theme="@style/Theme.MaterialComponents.DayNight.NoActionBar">
+        android:supportsRtl="true"
+        android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
         <activity
             android:name=".MainActivity"
             android:exported="true">
