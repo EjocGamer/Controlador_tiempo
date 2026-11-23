@@ -21,6 +21,8 @@ import kotlinx.coroutines.*
 import java.text.NumberFormat
 import java.util.Locale
 import kotlin.math.ceil
+import android.graphics.ImageDecoder
+import android.graphics.drawable.Drawable
 
 class MainActivity : AppCompatActivity() {
 
