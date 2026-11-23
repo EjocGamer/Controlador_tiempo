@@ -519,7 +519,7 @@ class MainActivity : AppCompatActivity() {
                     if (estaBloqueada(i)) {
                         Toast.makeText(this@MainActivity, "🔒 Desbloquea la estación para quitar el tiempo.", Toast.LENGTH_SHORT).show()
                     } else {
-                        quitarTimerTv(i)
+                        (i)
                     }
                 }
             }
@@ -1034,8 +1034,8 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this@MainActivity, "Sin conexión con ${obtenerNombre(id)}", Toast.LENGTH_SHORT).show()
                 }
             } else {
-                // 1B. Pasar a Ventana de Seguridad y activar cronómetro LIBRE en el overlay
-                val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; T=\$(date +%s); echo \$T > /sdcard/Download/sala_libre.txt; am startservice -n com.salajuegos.ejocoverlay/.OverlayService --es accion LIBRE --el ts \$T 2>/dev/null"
+                // Pasar a Ventana de seguridad y avisar con accion ESPERA
+                val cmd = "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; T=\$(date +%s); echo \$T > /sdcard/Download/sala_libre.txt; am startservice -n com.salajuegos.ejocoverlay/.OverlayService --es accion ESPERA --el ts \$T 2>/dev/null"
                 val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
                 if (res != null) {
                     EstadoSala.online[id] = true
