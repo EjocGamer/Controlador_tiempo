@@ -1077,7 +1077,8 @@ class MainActivity : AppCompatActivity() {
     private fun encenderTv(id: Int) {
         lifecycleScope.launch {
             val ip = obtenerIp(id)
-            val res = AdbManager.ejecutar(this@MainActivity, ip, "input keyevent 224", esAccionManual = true)
+            val cmd = "am startservice -n com.salajuegos.ejocoverlay/.OverlayService --es accion PERMITIR 2>/dev/null; input keyevent 224"
+            val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
             if (res != null) {
                 EstadoSala.online[id] = true
                 pintarTarjeta(id)
