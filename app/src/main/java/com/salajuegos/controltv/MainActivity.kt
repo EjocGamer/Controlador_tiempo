@@ -1022,7 +1022,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     @SuppressLint("ClickableViewAccessibility")
-    @SuppressLint("ClickableViewAccessibility")
     private fun configurarBotonVolumenContinuo(boton: Button, id: Int, keycode: Int) {
         var jobRepeticion: Job? = null
         boton.setOnTouchListener { v, event ->
