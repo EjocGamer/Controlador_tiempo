@@ -436,19 +436,24 @@ class MainActivity : AppCompatActivity() {
                 tag = "reloj_$i"
             }
 
-            // 3. FILA PRINCIPAL DE TIEMPOS: [⏹ Quitar Tiempo] + [+15m] [+30m] [+45m] [+1h] [+2h]
-            val filaTiempos = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+           // 3. FILA PRINCIPAL DE TIEMPOS: [⏹ Quitar Tiempo] + [+15m] [+30m] [+45m] [+1h]
+            val filaTiempos = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
 
             val btnQuitarPrincipal = crearBotonGrande(
                 "⏹ Quitar Tiempo",
                 if (bloqueada) "#1E293B" else "#475569",
-                11f,
+                12.5f,
                 if (bloqueada) "#334155" else "#64748B"
             ).apply {
                 alpha = if (bloqueada) 0.45f else 1.0f
-                setPadding(dp(4), dp(8), dp(4), dp(8))
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.35f).apply {
-                    setMargins(0, 0, dp(3), dp(12))
+                maxLines = 1
+                isSingleLine = true
+                setPadding(dp(8), dp(12), dp(8), dp(12))
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.55f).apply {
+                    setMargins(0, 0, dp(4), dp(12))
                 }
                 setOnClickListener {
                     if (estaBloqueada(i)) {
@@ -464,13 +469,14 @@ class MainActivity : AppCompatActivity() {
                 Triple(15, "+15m", "#0284C7"),
                 Triple(30, "+30m", "#0284C7"),
                 Triple(45, "+45m", "#0369A1"),
-                Triple(60, "+1h", "#2563EB"),
-                Triple(120, "+2h", "#4F46E5")
+                Triple(60, "+1h", "#2563EB")
             ).forEachIndexed { idx, (mins, etiqueta, color) ->
                 val btn = crearBotonTiempoProtegido(i, mins, etiqueta, color, bloqueada).apply {
                     textSize = 12.5f
+                    maxLines = 1
+                    isSingleLine = true
                     layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                        setMargins(dp(2), 0, if (idx == 4) 0 else dp(2), dp(12))
+                        setMargins(dp(3), 0, if (idx == 3) 0 else dp(3), dp(12))
                     }
                 }
                 filaTiempos.addView(btn)
@@ -1016,19 +1022,43 @@ class MainActivity : AppCompatActivity() {
     }
 
     @SuppressLint("ClickableViewAccessibility")
+    @SuppressLint("ClickableViewAccessibility")
     private fun configurarBotonVolumenContinuo(boton: Button, id: Int, keycode: Int) {
         var jobRepeticion: Job? = null
         boton.setOnTouchListener { v, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     v.isPressed = true
-                    enviarTeclaRapida(id, keycode)
                     jobRepeticion?.cancel()
                     jobRepeticion = lifecycleScope.launch {
-                        delay(350L)
+                        val ip = obtenerIp(id)
+                        // 1. Primer pulso inmediato al tocar
+                        val resInicial = AdbManager.ejecutar(this@MainActivity, ip, "input keyevent $keycode", esAccionManual = true)
+                        if (resInicial != null) {
+                            EstadoSala.online[id] = true
+                        } else {
+                            EstadoSala.online[id] = false
+                            pintarTarjeta(id)
+                            Toast.makeText(this@MainActivity, "${obtenerNombre(id)} sin conexión", Toast.LENGTH_SHORT).show()
+                            return@launch
+                        }
+
+                        // Pausa breve para distinguir toque único de pulsación sostenida
+                        delay(280L)
+
+                        // 2. Bucle incremental: espera cada respuesta ADB antes de enviar la siguiente
+                        // y reduce la pausa progresivamente cuanto más tiempo se mantenga pulsado
+                        var pasos = 0
                         while (isActive) {
-                            enviarTeclaRapida(id, keycode)
-                            delay(180L)
+                            val ok = AdbManager.ejecutar(this@MainActivity, ip, "input keyevent $keycode", esAccionManual = true)
+                            if (ok == null || !isActive) break
+                            pasos++
+                            val pausaIncremental = when {
+                                pasos < 3 -> 220L
+                                pasos < 7 -> 140L
+                                else -> 80L
+                            }
+                            delay(pausaIncremental)
                         }
                     }
                     true
