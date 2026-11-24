@@ -12,9 +12,12 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 
 object AdbManager {
+    private const val PREFS_HDMI = "ejoc_hdmi_cache"
+
     private var crypto: AdbCrypto? = null
     private val candadosPorIp = ConcurrentHashMap<String, Mutex>()
     private val pausaReconexionHasta = ConcurrentHashMap<String, Long>()
@@ -61,25 +64,4 @@ object AdbManager {
                 // Conectado: elimina cualquier espera pendiente
                 pausaReconexionHasta.remove(ip)
 
-                val stream = conn.open("shell:$comando")
-                val salida = StringBuilder()
-                while (!stream.isClosed) {
-                    try {
-                        val bytes = stream.read()
-                        if (bytes != null) salida.append(String(bytes))
-                    } catch (_: Exception) {
-                        break
-                    }
-                }
-                salida.toString()
-            } catch (_: Exception) {
-                // Espera breve de 4s para evitar colisiones sin generar retrasos visuales
-                pausaReconexionHasta[ip] = System.currentTimeMillis() + 4_000L
-                null
-            } finally {
-                try { conn?.close() } catch (_: Exception) {}
-                try { socket?.close() } catch (_: Exception) {}
-            }
-        }
-    }
-}
+                val
