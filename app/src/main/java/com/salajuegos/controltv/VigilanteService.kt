@@ -26,11 +26,7 @@ object EstadoSala {
         if (raw == null) {
             val existentes = mutableListOf<Int>()
             for (id in 1..6) {
-                val tieneNombre = prefs.contains("nombre_$id")
-                val tieneIp = prefs.contains("ip_$id")
-                if (tieneNombre) {
-                    existentes.add(id)
-                } else if (tieneIp) {
+                if (prefs.contains("nombre_$id") || prefs.contains("ip_$id")) {
                     existentes.add(id)
                 }
             }
@@ -54,6 +50,9 @@ class VigilanteService : Service() {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val avisoEnviado = ConcurrentHashMap<Int, Boolean>()
     private val estadoTextoNotif = ConcurrentHashMap<Int, String>()
+
+    private var ultimoTextoNotif: String = ""
+    private var foregroundIniciado: Boolean = false
 
     override fun onCreate() {
         super.onCreate()
@@ -116,6 +115,9 @@ class VigilanteService : Service() {
     }
 
     private fun actualizarNotificacionEnVivo(resumenTexto: String) {
+        if (foregroundIniciado && resumenTexto == ultimoTextoNotif) return
+        ultimoTextoNotif = resumenTexto
+
         val notif = NotificationCompat.Builder(this, "ejoc_vigilante")
             .setContentTitle("🎮 EjocGames Time • Tiempos Activos")
             .setContentText(resumenTexto.lines().firstOrNull() ?: "Sin estaciones activas")
@@ -126,7 +128,13 @@ class VigilanteService : Service() {
             .setContentIntent(obtenerPendingIntentPrincipal())
             .build()
 
-        startForeground(101, notif)
+        if (!foregroundIniciado) {
+            startForeground(101, notif)
+            foregroundIniciado = true
+        } else {
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.notify(101, notif)
+        }
     }
 
     private fun lanzarAlertaDependiente(id: Int, nombreEstacion: String, segundosRestantes: Int) {
@@ -159,10 +167,13 @@ class VigilanteService : Service() {
                 val idsSet = ids.toSet()
 
                 estadoTextoNotif.keys.toList().forEach { k ->
-                    if (!idsSet.contains(k)) estadoTextoNotif.remove(k)
-                }
-                avisoEnviado.keys.toList().forEach { k ->
-                    if (!idsSet.contains(k)) avisoEnviado.remove(k)
+                    if (!idsSet.contains(k)) {
+                        estadoTextoNotif.remove(k)
+                        avisoEnviado.remove(k)
+                        EstadoSala.online.remove(k)
+                        EstadoSala.segundos.remove(k)
+                        EstadoSala.esLibre.remove(k)
+                    }
                 }
 
                 val tareas = ids.map { id ->
@@ -178,14 +189,16 @@ class VigilanteService : Service() {
                     val txt = estadoTextoNotif[id]
                     if (!txt.isNullOrEmpty()) txt else null
                 }
-                val textoFinal = if (lineas.isEmpty()) {
-                    "Ninguna estación con tiempo activo"
-                } else {
+                val hayActivas = lineas.isNotEmpty()
+                val textoFinal = if (hayActivas) {
                     lineas.joinToString("\n")
+                } else {
+                    "Ninguna estación con tiempo activo"
                 }
                 actualizarNotificacionEnVivo(textoFinal)
 
-                delay(3000)
+                // 3s si hay tiempo corriendo; 6s si toda la sala está sin tiempo
+                delay(if (hayActivas) 3000L else 6000L)
             }
         }
     }
@@ -273,7 +286,7 @@ class VigilanteService : Service() {
             AdbManager.ejecutar(
                 this,
                 ip,
-                "rm -f /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; input keyevent 26",
+                "rm -f /data/local/tmp/sala_fin.txt /sdcard/Download/sala_fin.txt /sdcard/Download/sala_pid.txt; input keyevent 26",
                 esAccionManual = true
             )
         }
