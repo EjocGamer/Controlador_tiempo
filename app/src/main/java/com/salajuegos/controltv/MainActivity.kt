@@ -21,8 +21,6 @@ import kotlinx.coroutines.*
 import java.text.NumberFormat
 import java.util.Locale
 import kotlin.math.ceil
-import android.graphics.ImageDecoder
-import android.graphics.drawable.Drawable
 
 class MainActivity : AppCompatActivity() {
 
@@ -105,7 +103,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         construirTarjetas()
-        sincronizarAhoraEnParalelo()
         iniciarRefrescoVisual()
     }
 
@@ -156,6 +153,10 @@ class MainActivity : AppCompatActivity() {
         return prefs.getString("ip_$id", "192.168.1.${100 + id}") ?: "192.168.1.${100 + id}"
     }
 
+    private fun obtenerPuertoHdmi(id: Int): Int {
+        return getSharedPreferences("sala_tvs", Context.MODE_PRIVATE).getInt("puerto_hdmi_$id", 1)
+    }
+
     private fun obtenerTarifa15(id: Int): Int {
         return getSharedPreferences("sala_tvs", Context.MODE_PRIVATE).getInt("tarifa_15_$id", 1500)
     }
@@ -179,11 +180,17 @@ class MainActivity : AppCompatActivity() {
         t15: Int,
         t30: Int,
         t45: Int,
-        t60: Int
+        t60: Int,
+        puertoHdmi: Int = 1
     ) {
+        val ipAnterior = obtenerIp(id)
+        if (ipAnterior != ip) {
+            AdbManager.limpiarCacheHdmi(this, ipAnterior)
+        }
         getSharedPreferences("sala_tvs", Context.MODE_PRIVATE).edit()
             .putString("nombre_$id", nombre.ifBlank { "Estación $id" })
             .putString("ip_$id", ip)
+            .putInt("puerto_hdmi_$id", puertoHdmi.coerceIn(1, 4))
             .putInt("tarifa_15_$id", t15)
             .putInt("tarifa_30_$id", t30)
             .putInt("tarifa_45_$id", t45)
@@ -192,6 +199,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun eliminarEstacion(id: Int) {
+        val ipAnterior = obtenerIp(id)
+        AdbManager.limpiarCacheHdmi(this, ipAnterior)
+
         val actuales = EstadoSala.obtenerIdsEstaciones(this).toMutableList()
         actuales.remove(id)
         EstadoSala.guardarIdsEstaciones(this, actuales)
@@ -199,6 +209,7 @@ class MainActivity : AppCompatActivity() {
         getSharedPreferences("sala_tvs", Context.MODE_PRIVATE).edit()
             .remove("nombre_$id")
             .remove("ip_$id")
+            .remove("puerto_hdmi_$id")
             .remove("tarifa_15_$id")
             .remove("tarifa_30_$id")
             .remove("tarifa_45_$id")
@@ -216,7 +227,6 @@ class MainActivity : AppCompatActivity() {
         construirTarjetas()
         Toast.makeText(this, "Estación eliminada", Toast.LENGTH_SHORT).show()
     }
-
     private fun calcularValorSesion(id: Int, totalMinutos: Int): Int {
         if (totalMinutos <= 0) return 0
         val p15 = obtenerTarifa15(id)
@@ -910,6 +920,16 @@ class MainActivity : AppCompatActivity() {
             keyListener = DigitsKeyListener.getInstance("0123456789.")
         }
 
+        val lblHdmi = TextView(this).apply {
+            text = "Puerto HDMI de la consola (1 a 4):"
+            setTypeface(null, Typeface.BOLD)
+            setPadding(0, dp(12), 0, 0)
+        }
+        val inputHdmi = EditText(this).apply {
+            setText(if (esNueva) "1" else obtenerPuertoHdmi(id).toString())
+            inputType = InputType.TYPE_CLASS_NUMBER
+        }
+
         val lblTarifasTitulo = TextView(this).apply {
             text = "💰 Tarifas de esta estación (en pesos):"
             setTypeface(null, Typeface.BOLD)
@@ -953,6 +973,8 @@ class MainActivity : AppCompatActivity() {
         layout.addView(inputNombre)
         layout.addView(lblIp)
         layout.addView(inputIp)
+        layout.addView(lblHdmi)
+        layout.addView(inputHdmi)
         layout.addView(lblTarifasTitulo)
         layout.addView(lbl15)
         layout.addView(input15)
@@ -972,6 +994,7 @@ class MainActivity : AppCompatActivity() {
                 val t30 = input30.text.toString().trim().toIntOrNull() ?: obtenerTarifa30(id)
                 val t45 = input45.text.toString().trim().toIntOrNull() ?: obtenerTarifa45(id)
                 val t60 = input60.text.toString().trim().toIntOrNull() ?: obtenerTarifa60(id)
+                val puertoHdmi = (inputHdmi.text.toString().trim().toIntOrNull() ?: 1).coerceIn(1, 4)
 
                 if (esNueva) {
                     val actuales = EstadoSala.obtenerIdsEstaciones(this).toMutableList()
@@ -986,7 +1009,8 @@ class MainActivity : AppCompatActivity() {
                     t15,
                     t30,
                     t45,
-                    t60
+                    t60,
+                    puertoHdmi
                 )
                 construirTarjetas()
                 sincronizarAhoraEnParalelo()
@@ -1079,14 +1103,15 @@ class MainActivity : AppCompatActivity() {
     private fun encenderTv(id: Int) {
         lifecycleScope.launch {
             val ip = obtenerIp(id)
+            val puertoHdmi = obtenerPuertoHdmi(id)
             val cmd = "am startservice -n com.salajuegos.ejocoverlay/.OverlayService --es accion PERMITIR 2>/dev/null; input keyevent 224"
             val res = AdbManager.ejecutar(this@MainActivity, ip, cmd, esAccionManual = true)
             if (res != null) {
                 EstadoSala.online[id] = true
                 pintarTarjeta(id)
-                Toast.makeText(this@MainActivity, "Encendiendo ${obtenerNombre(id)} en HDMI 1...", Toast.LENGTH_SHORT).show()
-                delay(1200)
-                AdbManager.ejecutar(this@MainActivity, ip, "input keyevent 243", esAccionManual = true)
+                Toast.makeText(this@MainActivity, "Encendiendo ${obtenerNombre(id)} en HDMI $puertoHdmi...", Toast.LENGTH_SHORT).show()
+                delay(2200)
+                AdbManager.cambiarAHdmiUniversal(this@MainActivity, ip, puertoHdmi)
             } else {
                 Toast.makeText(this@MainActivity, "TV en reposo profundo (usa el control físico)", Toast.LENGTH_SHORT).show()
             }
